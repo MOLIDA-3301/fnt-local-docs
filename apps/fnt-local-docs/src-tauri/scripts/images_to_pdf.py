@@ -1,3 +1,4 @@
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -6,9 +7,17 @@ from PIL import Image
 
 
 def main() -> None:
-    request = json.loads(sys.stdin.read())
-    sources = [Path(value) for value in request["sources"]]
-    destination = Path(request["destination"])
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--destination")
+    parser.add_argument("--source", action="append", default=[])
+    args = parser.parse_args()
+    if args.destination:
+        sources = [Path(value) for value in args.source]
+        destination = Path(args.destination)
+    else:
+        request = json.loads(sys.stdin.read())
+        sources = [Path(value) for value in request["sources"]]
+        destination = Path(request["destination"])
     if not sources:
         raise ValueError("至少需要一张图片")
 
