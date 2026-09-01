@@ -1,0 +1,24 @@
+# JavaScript
+node_modules/
+dist/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Tauri and build artifacts
+target/
+src-tauri/target/
+
+# Local data and test documents
+app-data/
+test-files/
+tmp/
+*.log
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
