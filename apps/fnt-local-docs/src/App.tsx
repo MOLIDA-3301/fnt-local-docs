@@ -153,6 +153,20 @@ export default function App() {
     }
   }
 
+  async function exportSelectedText(format: "text" | "markdown") {
+    if (!selectedJob || !isPdf(selectedJob.path)) return;
+    const extension = format === "markdown" ? "md" : "txt";
+    const destination = await save({ defaultPath: `${selectedJob.name.replace(/\.pdf$/i, "")}.${extension}`, filters: [{ name: format === "markdown" ? "Markdown" : "文本", extensions: [extension] }] });
+    if (!destination) return;
+    updateJob(selectedJob.id, { status: "running", progress: 40, detail: "正在提取电子文字" });
+    try {
+      const output = await invoke<string>("pdf_to_text", { source: selectedJob.path, destination, format, password: password || null });
+      updateJob(selectedJob.id, { status: "completed", progress: 100, detail: `已导出 ${extension.toUpperCase()}`, output });
+    } catch (error) {
+      updateJob(selectedJob.id, { status: "failed", progress: 0, detail: String(error) });
+    }
+  }
+
   return (
     <main className="app">
       <aside>
@@ -164,7 +178,7 @@ export default function App() {
       <section className="work">
         <header><div><small>工作台 / 转换队列</small><h1>本地转换任务</h1></div><div className="header-actions"><button onClick={mergeQueuedPdfs} disabled={pdfJobs.length === 0}>合并 PDF</button><button onClick={mergeImages} disabled={imageJobs.length === 0}>图片转 PDF</button></div></header>
         <div className="cards"><p>队列任务<strong>{jobs.length}</strong><small>{completedCount} 个已完成</small></p><p>图片 / PDF<strong>{imageJobs.length} / {pdfJobs.length}</strong><small>输出顺序跟随队列</small></p><p>处理模式<strong>离线</strong><small>文件不上传服务器</small></p></div>
-        <button className="drop" onClick={chooseFiles}><b>选择文件</b><span>先支持图片按顺序合并 PDF，其余转换将逐步接入</span><em>浏览本机</em></button>
+        <button className="drop" onClick={chooseFiles}><b>选择文件</b><span>支持图片转 PDF、PDF 合并拆分、安全处理与文字提取</span><em>浏览本机</em></button>
         <div className="queue-heading"><h2>转换队列</h2><div><button onClick={() => moveSelected(-1)} disabled={!selectedJob}>上移</button><button onClick={() => moveSelected(1)} disabled={!selectedJob}>下移</button><button onClick={removeSelected} disabled={!selectedJob}>移除</button></div></div>
         {jobs.length === 0 ? <div className="empty">添加图片后即可生成第一个本地 PDF。</div> : jobs.map((job) => (
           <button className={job.id === selectedId ? "job on" : "job"} key={job.id} onClick={() => setSelectedId(job.id)}>
@@ -172,7 +186,7 @@ export default function App() {
           </button>
         ))}
       </section>
-      <aside className="preview"><div><small>结果与详情</small><b>{selectedJob?.name ?? "尚未选择文件"}</b></div><article><b>FNT</b><h3>{selectedJob?.kind ?? "本地文档转换"}</h3><p>{selectedJob?.detail ?? "从左侧添加文件开始。"}</p>{selectedJob && isPdf(selectedJob.path) ? <section className="pdf-tools"><label>每组页数<input type="number" min="1" value={pagesPerFile} onChange={(event) => setPagesPerFile(Math.max(1, Number(event.currentTarget.value) || 1))} /></label><label>PDF 密码<input type="password" value={password} onChange={(event) => setPassword(event.currentTarget.value)} placeholder="加密或解密时填写" /></label><div><button onClick={() => runSelectedPdfAction("split_pdf")}>拆分 ZIP</button><button onClick={() => runSelectedPdfAction("encrypt_pdf")} disabled={!password}>AES-256 加密</button><button onClick={() => runSelectedPdfAction("decrypt_pdf")} disabled={!password}>密码解密</button></div></section> : null}<hr /><p className="path">{selectedJob?.output ?? selectedJob?.path ?? "预览不会将文件发送到网络。"}</p></article><footer>{selectedJob ? STATUS_LABEL[selectedJob.status] : "空队列"}<button className="primary" onClick={selectedJob && isPdf(selectedJob.path) ? mergeQueuedPdfs : mergeImages} disabled={!selectedJob}>开始处理</button></footer></aside>
+      <aside className="preview"><div><small>结果与详情</small><b>{selectedJob?.name ?? "尚未选择文件"}</b></div><article><b>FNT</b><h3>{selectedJob?.kind ?? "本地文档转换"}</h3><p>{selectedJob?.detail ?? "从左侧添加文件开始。"}</p>{selectedJob && isPdf(selectedJob.path) ? <section className="pdf-tools"><label>每组页数<input type="number" min="1" value={pagesPerFile} onChange={(event) => setPagesPerFile(Math.max(1, Number(event.currentTarget.value) || 1))} /></label><label>PDF 密码<input type="password" value={password} onChange={(event) => setPassword(event.currentTarget.value)} placeholder="加密或解密时填写" /></label><div><button onClick={() => exportSelectedText("text")}>导出 TXT</button><button onClick={() => exportSelectedText("markdown")}>导出 Markdown</button><button onClick={() => runSelectedPdfAction("split_pdf")}>拆分 ZIP</button><button onClick={() => runSelectedPdfAction("encrypt_pdf")} disabled={!password}>AES-256 加密</button><button onClick={() => runSelectedPdfAction("decrypt_pdf")} disabled={!password}>密码解密</button></div></section> : null}<hr /><p className="path">{selectedJob?.output ?? selectedJob?.path ?? "预览不会将文件发送到网络。"}</p></article><footer>{selectedJob ? STATUS_LABEL[selectedJob.status] : "空队列"}<button className="primary" onClick={selectedJob && isPdf(selectedJob.path) ? mergeQueuedPdfs : mergeImages} disabled={!selectedJob}>开始处理</button></footer></aside>
     </main>
   );
 }

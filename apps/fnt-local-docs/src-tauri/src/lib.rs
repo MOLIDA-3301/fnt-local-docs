@@ -44,13 +44,20 @@ async fn decrypt_pdf(app: tauri::AppHandle, source: String, destination: String,
     run_converter(&app, args, destination).await
 }
 
+#[tauri::command]
+async fn pdf_to_text(app: tauri::AppHandle, source: String, destination: String, format: String, password: Option<String>) -> Result<String, String> {
+    let mut args = vec!["pdf-to-text".into(), "--source".into(), source, "--destination".into(), destination.clone(), "--format".into(), format];
+    if let Some(password) = password { args.push("--password".into()); args.push(password); }
+    run_converter(&app, args, destination).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![merge_images_to_pdf, merge_pdfs, split_pdf, encrypt_pdf, decrypt_pdf])
+        .invoke_handler(tauri::generate_handler![merge_images_to_pdf, merge_pdfs, split_pdf, encrypt_pdf, decrypt_pdf, pdf_to_text])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -91,6 +91,21 @@ def decrypt_pdf(source: Path, destination: Path, password: str) -> None:
         writer.write(stream)
 
 
+def pdf_to_text(source: Path, destination: Path, output_format: str, password: str | None) -> None:
+    reader = PdfReader(source)
+    if reader.is_encrypted and not reader.decrypt(password or ""):
+        raise ValueError("PDF 密码不正确")
+    pages = [(page.extract_text() or "").strip() for page in reader.pages]
+    if not any(pages):
+        raise ValueError("未提取到电子文字：该文档可能是扫描件，请使用 OCR")
+    if output_format == "markdown":
+        content = "\n\n".join(f"## 第 {index} 页\n\n{text}" for index, text in enumerate(pages, 1) if text)
+    else:
+        content = "\n\n".join(f"===== 第 {index} 页 =====\n{text}" for index, text in enumerate(pages, 1) if text)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(content, encoding="utf-8")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -113,6 +128,11 @@ def build_parser() -> argparse.ArgumentParser:
     decrypt.add_argument("--source", required=True)
     decrypt.add_argument("--destination", required=True)
     decrypt.add_argument("--password", required=True)
+    text = subparsers.add_parser("pdf-to-text")
+    text.add_argument("--source", required=True)
+    text.add_argument("--destination", required=True)
+    text.add_argument("--format", choices=["text", "markdown"], default="text")
+    text.add_argument("--password")
     return parser
 
 
@@ -128,6 +148,8 @@ def main() -> None:
         encrypt_pdf(Path(args.source), Path(args.destination), args.password)
     elif args.command == "decrypt-pdf":
         decrypt_pdf(Path(args.source), Path(args.destination), args.password)
+    elif args.command == "pdf-to-text":
+        pdf_to_text(Path(args.source), Path(args.destination), args.format, args.password)
     print(json.dumps({"ok": True}, ensure_ascii=False))
 
 
