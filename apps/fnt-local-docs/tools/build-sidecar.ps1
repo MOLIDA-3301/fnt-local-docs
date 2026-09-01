@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $appRoot = Split-Path -Parent $PSScriptRoot
 $tauriRoot = Join-Path $appRoot "src-tauri"
-$pythonScript = Join-Path $tauriRoot "scripts\images_to_pdf.py"
+$pythonScript = Join-Path $tauriRoot "scripts\converter.py"
 $buildRoot = Join-Path $tauriRoot "sidecar-build"
 $binaryRoot = Join-Path $tauriRoot "binaries"
 $targetTriple = (& rustc --print host-tuple).Trim()
