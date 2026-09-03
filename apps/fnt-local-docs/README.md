@@ -43,6 +43,9 @@ each feature, is maintained in [docs/feature-matrix.md](docs/feature-matrix.md).
 - Merge, split, organize, compress, watermark, number, encrypt, and decrypt PDFs.
 - Pause, resume, cancel, and retry batch work; retain local history and preview
   supported results in a responsive side/bottom panel.
+- Show per-file and overall progress, report success/failure with paths and
+  reasons, and optionally reveal the completed result in Explorer.
+- Add text, image, or repeating pattern watermarks and page numbers to PDFs.
 - Save default output, naming, conflict, OCR/DPI, LibreOffice, and temporary
   resource-path preferences in the local settings center.
 - Enforce image and batch resource limits while isolating per-file failures.

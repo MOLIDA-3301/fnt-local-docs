@@ -21,6 +21,7 @@ type Job = {
 };
 type HistoryEntry = { id: number; source: string; time: string; output?: string; error?: string };
 type LocalFile = { path: string; size: number };
+type ToastMessage = { id: number; kind: "success" | "error"; title: string; detail: string; path: string };
 type AppSettings = {
   outputFolder: string;
   libreOfficeOverride: string;
@@ -29,6 +30,7 @@ type AppSettings = {
   conflictPolicy: "rename" | "overwrite" | "skip";
   ocrConfidence: number;
   imageDpi: number;
+  autoOpenResult: boolean;
 };
 
 const STORAGE_KEY = "fnt.queue.v2";
@@ -74,6 +76,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   conflictPolicy: "rename",
   ocrConfidence: 80,
   imageDpi: 150,
+  autoOpenResult: true,
 };
 
 function loadSettings(): AppSettings {
@@ -167,12 +170,15 @@ export default function App() {
   const [pageSpec, setPageSpec] = useState("");
   const [rotation, setRotation] = useState(0);
   const [watermark, setWatermark] = useState("");
+  const [watermarkImage, setWatermarkImage] = useState("");
   const [pageNumbers, setPageNumbers] = useState(false);
   const [outputFolder, setOutputFolder] = useState(INITIAL_SETTINGS.outputFolder);
   const [libreOfficeOverride, setLibreOfficeOverride] = useState(INITIAL_SETTINGS.libreOfficeOverride);
   const [tempDirectory, setTempDirectory] = useState(INITIAL_SETTINGS.tempDirectory);
   const [namingRule, setNamingRule] = useState(INITIAL_SETTINGS.namingRule);
   const [conflictPolicy, setConflictPolicy] = useState<"rename" | "overwrite" | "skip">(INITIAL_SETTINGS.conflictPolicy);
+  const [autoOpenResult, setAutoOpenResult] = useState(INITIAL_SETTINGS.autoOpenResult);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
   const [batchStatus, setBatchStatus] = useState<"idle" | "running" | "paused" | "cancelled">("idle");
   const pauseRef = useRef(false);
   const cancelRef = useRef(false);
@@ -182,6 +188,8 @@ export default function App() {
       .filter((job) => job.status === "completed" || job.status === "failed")
       .map((job) => [job.id, `${job.status}|${job.output ?? ""}|${job.detail}`]),
   ));
+  const revealedOutputsRef = useRef(new Set(INITIAL_JOBS.flatMap((job) => job.output ? [job.output] : [])));
+  const pendingRevealRef = useRef(new Set<string>());
   const [password, setPassword] = useState("");
   const [libreOfficePath, setLibreOfficePath] = useState<string | null | undefined>(undefined);
   const activeTool = TOOLS.find((tool) => tool.id === activeToolId) ?? TOOLS[0];
@@ -191,6 +199,9 @@ export default function App() {
   const completedCount = useMemo(() => jobs.filter((job) => job.status === "completed").length, [jobs]);
   const toPdfJobs = useMemo(() => jobs.filter((job) => TO_PDF_EXTENSIONS.has(extension(job.path))), [jobs]);
   const activeInputJobs = useMemo(() => jobs.filter((job) => toolMatchesPath(activeToolId, job.path)), [activeToolId, jobs]);
+  const activeProgress = activeInputJobs.length === 0 ? 0 : Math.round(activeInputJobs.reduce((sum, job) => sum + job.progress, 0) / activeInputJobs.length);
+  const activeFailures = activeInputJobs.filter((job) => job.status === "failed").length;
+  const hasRunningJobs = jobs.some((job) => job.status === "running");
   const canRunActiveTool = activeTool.requirement === "image"
     ? imageJobs.length > 0
     : activeTool.requirement === "pdf"
@@ -224,13 +235,17 @@ export default function App() {
       conflictPolicy,
       ocrConfidence,
       imageDpi,
+      autoOpenResult,
     } satisfies AppSettings));
-  }, [conflictPolicy, imageDpi, libreOfficeOverride, namingRule, ocrConfidence, outputFolder, tempDirectory]);
+  }, [autoOpenResult, conflictPolicy, imageDpi, libreOfficeOverride, namingRule, ocrConfidence, outputFolder, tempDirectory]);
 
   useEffect(() => {
     const additions: HistoryEntry[] = [];
     for (const job of jobs) {
-      if (job.status !== "completed" && job.status !== "failed") continue;
+      if (job.status !== "completed" && job.status !== "failed") {
+        terminalSignaturesRef.current.delete(job.id);
+        continue;
+      }
       const signature = `${job.status}|${job.output ?? ""}|${job.detail}`;
       if (terminalSignaturesRef.current.get(job.id) === signature) continue;
       terminalSignaturesRef.current.set(job.id, signature);
@@ -243,9 +258,55 @@ export default function App() {
       });
     }
     if (additions.length > 0) {
-      setHistory((current) => [...additions.reverse(), ...current].slice(0, 500));
+      const latest = additions[additions.length - 1];
+      setHistory((current) => [...additions.slice().reverse(), ...current].slice(0, 500));
+      setToast({
+        id: Date.now(),
+        kind: latest.error ? "error" : "success",
+        title: latest.error ? "处理失败" : "转换成功",
+        detail: latest.error || "结果已经保存到电脑。",
+        path: latest.output || latest.source,
+      });
     }
   }, [jobs]);
+
+  useEffect(() => {
+    for (const job of jobs) {
+      if (job.status === "completed" && job.output && !revealedOutputsRef.current.has(job.output)) {
+        pendingRevealRef.current.add(job.output);
+      } else if (job.status !== "completed" && job.output) {
+        revealedOutputsRef.current.delete(job.output);
+        pendingRevealRef.current.delete(job.output);
+      }
+    }
+    if (!autoOpenResult) {
+      pendingRevealRef.current.forEach((path) => revealedOutputsRef.current.add(path));
+      pendingRevealRef.current.clear();
+      return;
+    }
+    if (!IS_TAURI || batchStatus === "running" || batchStatus === "paused" || hasRunningJobs) return;
+    const pending = Array.from(pendingRevealRef.current);
+    const latest = pending[pending.length - 1];
+    pending.forEach((path) => revealedOutputsRef.current.add(path));
+    pendingRevealRef.current.clear();
+    if (latest) invoke("reveal_path", { path: latest }).catch(() => undefined);
+  }, [autoOpenResult, batchStatus, hasRunningJobs, jobs]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timeout = window.setTimeout(() => setToast((current) => current?.id === toast.id ? null : current), toast.kind === "error" ? 10000 : 7000);
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
+
+  useEffect(() => {
+    if (!hasRunningJobs) return;
+    const interval = window.setInterval(() => {
+      setJobs((current) => current.map((job) => job.status === "running" && job.progress < 92
+        ? { ...job, progress: Math.min(92, job.progress + Math.max(1, Math.round((92 - job.progress) / 9))) }
+        : job));
+    }, 550);
+    return () => window.clearInterval(interval);
+  }, [hasRunningJobs]);
 
   useEffect(() => {
     if (!IS_TAURI) {
@@ -320,22 +381,26 @@ export default function App() {
     }
   }
 
-  function moveSelected(offset: -1 | 1) {
-    if (selectedId === null) return;
+  function moveJob(id: number, offset: -1 | 1) {
     setJobs((current) => {
-      const index = current.findIndex((job) => job.id === selectedId);
+      const index = current.findIndex((job) => job.id === id);
       const target = index + offset;
       if (index < 0 || target < 0 || target >= current.length) return current;
       const next = [...current];
       [next[index], next[target]] = [next[target], next[index]];
       return next;
     });
+    setSelectedId(id);
   }
 
-  function removeSelected() {
-    if (selectedId === null) return;
-    setJobs((current) => current.filter((job) => job.id !== selectedId));
-    setSelectedId(null);
+  function removeJob(id: number) {
+    setJobs((current) => current.filter((job) => job.id !== id));
+    setSelectedId((current) => current === id ? null : current);
+  }
+
+  function retryJob(id: number) {
+    updateJob(id, { status: "waiting", progress: 0, detail: "等待重新运行", output: undefined });
+    setSelectedId(id);
   }
 
   async function mergeImages() {
@@ -402,6 +467,12 @@ export default function App() {
     setTempDirectory(selected);
   }
 
+  async function selectWatermarkImage() {
+    const selected = await open({ multiple: false, directory: false, filters: [{ name: "水印图片", extensions: ["png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff"] }] });
+    if (!selected || Array.isArray(selected)) return;
+    setWatermarkImage(selected);
+  }
+
   async function runBatchPdf() {
     if (batchStatus === "running" || batchStatus === "paused") return;
     const candidates = jobs.filter((job) => TO_PDF_EXTENSIONS.has(extension(job.path)));
@@ -456,10 +527,6 @@ export default function App() {
     cancelRef.current = true;
     pauseRef.current = false;
     setBatchStatus("cancelled");
-  }
-
-  function retryFailed() {
-    setJobs((current) => current.map((job) => job.status === "failed" || job.status === "cancelled" ? { ...job, status: "waiting", progress: 0, detail: "等待重试" } : job));
   }
 
   function updateJob(id: number, patch: Partial<Job>) {
@@ -588,7 +655,7 @@ export default function App() {
       const args = action === "organize_pdf"
         ? { source: selectedJob.path, destination, pages: pageSpec || null, rotate: rotation, password: password || null }
         : action === "stamp_pdf"
-          ? { source: selectedJob.path, destination, watermark: watermark || null, pageNumbers, password: password || null }
+          ? { source: selectedJob.path, destination, watermark: watermark || null, watermarkImage: watermarkImage || null, pageNumbers, password: password || null }
           : { source: selectedJob.path, destination, password: password || null };
       const output = await invoke<string>(action, args);
       updateJob(selectedJob.id, { status: "completed", progress: 100, detail: `${label}完成`, output });
@@ -644,7 +711,7 @@ export default function App() {
     }
   }
 
-  const running = batchStatus === "running" || jobs.some((job) => job.status === "running");
+  const running = batchStatus === "running" || hasRunningJobs;
   const needsLibreOffice = ["mixed-pdf", "batch-pdf", "word-pdf", "ppt-pdf", "sheet-pdf", "html-pdf"].includes(activeToolId);
   const needsDpi = activeToolId === "pdf-images" || activeToolId === "pdf-ppt";
   const needsOcr = activeTool.group === "ocr" || activeToolId === "pdf-excel";
@@ -703,6 +770,11 @@ export default function App() {
                 </div>
               </section>
 
+              <section className="home-requirements" aria-label="功能运行要求">
+                <article className="ready"><span>✓</span><div><b>安装后直接使用</b><p>OCR、PDF 转 Word / Excel / PPT / 图片 / 文字、图片与文本转 PDF，以及全部 PDF 整理和安全工具。</p><small>PDF 与 OCR 引擎、中英文模型已经内置，不需要 Python、Tesseract 或 FFmpeg。</small></div></article>
+                <article className="extra"><span>＋</span><div><b>以下功能需要免费 LibreOffice</b><p>Word、PowerPoint、Excel、CSV 和 HTML 转 PDF。</p><small>{libreOfficePath ? "已检测到 LibreOffice，这些功能现在可以使用。" : "当前尚未检测到；其他功能不受影响。"}</small><button onClick={() => openUrl("https://www.libreoffice.org/download/download-libreoffice/")}>免费下载 LibreOffice →</button></div></article>
+              </section>
+
               <section className="section-block">
                 <div className="section-heading"><div><p className="eyebrow">按任务查找</p><h2>你想做什么？</h2></div><span>四大类 · 全部能力一目了然</span></div>
                 <div className="category-grid">
@@ -755,14 +827,19 @@ export default function App() {
                 <section className="panel queue-panel">
                   <div className="panel-heading"><div><h2>待处理文件</h2><p>当前工具可用 {activeInputJobs.length} / {jobs.length} 个 · 点击一项作为当前文件</p></div><div><button className="button ghost small" onClick={chooseFolder}>添加文件夹</button><button className="button primary small" onClick={chooseFiles}>＋ 添加文件</button></div></div>
                   <button className="drop-zone" onClick={chooseFiles}><span>＋</span><div><b>点击选择，或将文件拖到这里</b><small>{activeTool.accepts}</small></div></button>
-                  <div className="queue-toolbar"><span>{activeTool.multi ? "输出顺序与队列一致" : "请选择一项作为当前处理文件"}</span><div><button onClick={retryFailed} disabled={!jobs.some((job) => job.status === "failed" || job.status === "cancelled")}>重试失败项</button><button onClick={() => moveSelected(-1)} disabled={!selectedJob}>上移</button><button onClick={() => moveSelected(1)} disabled={!selectedJob}>下移</button><button onClick={removeSelected} disabled={!selectedJob}>移除</button></div></div>
+                  <div className="queue-toolbar"><span>{activeTool.multi ? "文件右侧可调整顺序；输出顺序与队列一致" : "文件右侧可预览、重试或删除"}</span></div>
                   <div className="job-list">
                     {jobs.length === 0 ? <div className="empty-state"><span>□</span><b>还没有文件</b><p>添加符合格式的文件后，“开始运行”按钮会自动可用。</p></div> : jobs.map((job) => (
                       <article className={`job-row${job.id === selectedId ? " selected" : ""}${toolMatchesPath(activeToolId, job.path) ? "" : " unsupported"}`} key={job.id}>
                         <button className="job-select" onClick={() => setSelectedId(job.id)} aria-label={`选择 ${job.name}`}><span>{isImage(job.path) ? "IMG" : isPdf(job.path) ? "PDF" : extension(job.path).toUpperCase()}</span></button>
-                        <button className="job-info" onClick={() => setSelectedId(job.id)}><b title={job.name}>{job.name}</b><small>{job.kind} · {job.detail}</small>{job.progress > 0 && job.progress < 100 ? <i><em style={{ width: `${job.progress}%` }} /></i> : null}</button>
+                        <button className="job-info" onClick={() => setSelectedId(job.id)}><b title={job.name}>{job.name}</b><small>{job.kind} · {job.detail}</small><span className="job-progress"><i><em style={{ width: `${job.progress}%` }} /></i><strong>{job.progress}%</strong></span></button>
                         <span className={`status status-${job.status}`}>{toolMatchesPath(activeToolId, job.path) ? STATUS_LABEL[job.status] : "格式不符"}</span>
-                        <button className="row-action" onClick={() => { setSelectedId(job.id); setPreviewOpen(true); }}>预览</button>
+                        <div className="row-actions">
+                          <button onClick={() => { setSelectedId(job.id); setPreviewOpen(true); }} title="预览文件">预览</button>
+                          {job.status === "failed" || job.status === "cancelled" ? <button onClick={() => retryJob(job.id)} title="重新加入等待队列">重试</button> : null}
+                          {activeTool.multi ? <><button onClick={() => moveJob(job.id, -1)} disabled={job.status === "running" || jobs[0]?.id === job.id} title="向上移动">↑</button><button onClick={() => moveJob(job.id, 1)} disabled={job.status === "running" || jobs[jobs.length - 1]?.id === job.id} title="向下移动">↓</button></> : null}
+                          <button className="delete" onClick={() => removeJob(job.id)} disabled={job.status === "running"} title="从队列删除">删除</button>
+                        </div>
                       </article>
                     ))}
                   </div>
@@ -779,7 +856,7 @@ export default function App() {
                   {needsDpi ? <label className="field"><span>导出清晰度（DPI）</span><input type="number" min={activeToolId === "pdf-ppt" ? 96 : 72} max="600" value={imageDpi} onChange={(event) => setImageDpi(Math.min(600, Math.max(activeToolId === "pdf-ppt" ? 96 : 72, Number(event.currentTarget.value) || 150)))} /><small>推荐 150；数值越高，文件越大。</small></label> : null}
                   {needsOcr ? <label className="field"><span>低置信度阈值 <em className="plain-note">识别把握不足的提醒线</em></span><div className="range-row"><input type="range" min="50" max="99" value={ocrConfidence} onChange={(event) => setOcrConfidence(Number(event.currentTarget.value))} /><b>{ocrConfidence}%</b></div><small>文字识别的把握低于这个数时，结果会标记为“请人工核对”，不会删除文字。推荐保持 80%；图片模糊时可调到 65%–75%。</small></label> : null}
                   {activeToolId === "organize-pdf" ? <><label className="field"><span>页码范围与顺序</span><input value={pageSpec} onChange={(event) => setPageSpec(event.currentTarget.value)} placeholder="例如：3,1,2,5-8" /><small>省略页码即可删除该页；留空表示全部。</small></label><label className="field"><span>统一旋转</span><select value={rotation} onChange={(event) => setRotation(Number(event.currentTarget.value))}><option value={0}>不旋转</option><option value={90}>顺时针 90°</option><option value={180}>旋转 180°</option><option value={270}>顺时针 270°</option></select></label></> : null}
-                  {activeToolId === "stamp-pdf" ? <><label className="field"><span>水印文字</span><input value={watermark} onChange={(event) => setWatermark(event.currentTarget.value)} placeholder="输入要显示的水印" /></label><label className="check-field"><input type="checkbox" checked={pageNumbers} onChange={(event) => setPageNumbers(event.currentTarget.checked)} /><span><b>添加连续页码</b><small>页码显示在页面底部中央</small></span></label></> : null}
+                  {activeToolId === "stamp-pdf" ? <><label className="field"><span>水印文字</span><input value={watermark} onChange={(event) => setWatermark(event.currentTarget.value)} placeholder="可留空，例如：内部资料" /></label><label className="field"><span>图片 / 图案水印</span><div className="field-with-button"><input value={watermarkImage} readOnly placeholder="可选择 Logo、印章或自定义图案" /><button onClick={selectWatermarkImage}>选择图片</button></div><small>支持 PNG、JPG、WebP、BMP、TIFF；会以半透明斜向图案铺满页面。</small>{watermarkImage ? <button className="inline-clear" onClick={() => setWatermarkImage("")}>清除图片水印</button> : null}</label><label className="check-field"><input type="checkbox" checked={pageNumbers} onChange={(event) => setPageNumbers(event.currentTarget.checked)} /><span><b>添加连续页码</b><small>页码显示在页面底部中央</small></span></label></> : null}
                   {needsPassword ? <label className="field"><span>{activeToolId === "decrypt-pdf" ? "原 PDF 密码" : "设置 PDF 密码"}</span><input type="password" value={password} onChange={(event) => setPassword(event.currentTarget.value)} placeholder="请输入密码" /></label> : null}
                   {needsLibreOffice ? <section className={libreOfficePath ? "setting-note success" : "setting-note warning"}><b>{libreOfficePath ? "Office 引擎已就绪" : "Office 文件需要 LibreOffice"}</b><p>{libreOfficePath ? "DOCX、PPTX、XLSX、CSV 和 HTML 可以转换。" : "图片、TXT、Markdown 不受影响；Office 文件转换前请先安装。"}</p>{libreOfficePath === null ? <button onClick={() => openUrl("https://www.libreoffice.org/download/download-libreoffice/")}>安装 LibreOffice →</button> : null}</section> : null}
                   {!needsDpi && !needsOcr && !needsPassword && activeToolId !== "batch-pdf" && activeToolId !== "split-pdf" && activeToolId !== "organize-pdf" && activeToolId !== "stamp-pdf" && !needsLibreOffice ? <section className="setting-note neutral"><b>无需额外设置</b><p>确认左侧文件和顺序后即可开始运行。</p></section> : null}
@@ -788,10 +865,10 @@ export default function App() {
               </div>
 
               <footer className="run-dock">
-                <div><b>{canRunActiveTool ? "准备就绪" : activeTool.requirement === "image" ? "请添加至少一张图片" : activeTool.requirement === "any" ? "请添加支持的文件" : "请添加并选中符合要求的文件"}</b><span>{activeTool.title} · 全程本地处理</span></div>
+                <div className="run-status"><div><b>{running ? "正在处理" : activeFailures > 0 ? `${activeFailures} 个文件处理失败` : canRunActiveTool ? "准备就绪" : activeTool.requirement === "image" ? "请添加至少一张图片" : activeTool.requirement === "any" ? "请添加支持的文件" : "请添加并选中符合要求的文件"}</b><span>{running ? `${activeTool.title} · ${activeProgress}%` : `${activeTool.title} · ${completedCount} 个结果已完成`}</span></div><div className="overall-progress"><i><em style={{ width: `${activeProgress}%` }} /></i><strong>{activeProgress}%</strong></div></div>
                 <div className="run-actions">
                   {activeToolId === "batch-pdf" && (batchStatus === "running" || batchStatus === "paused") ? <><button className="button ghost" onClick={togglePause}>{batchStatus === "paused" ? "继续" : "暂停"}</button><button className="button danger" onClick={cancelBatch}>取消</button></> : null}
-                  <button className="button run-button" onClick={runActiveTool} disabled={!canRunActiveTool || running || (needsPassword && !password) || (activeToolId === "stamp-pdf" && !watermark && !pageNumbers)}><span>▶</span>{running ? "正在运行…" : "开始运行"}</button>
+                  <button className="button run-button" onClick={runActiveTool} disabled={!canRunActiveTool || running || (needsPassword && !password) || (activeToolId === "stamp-pdf" && !watermark && !watermarkImage && !pageNumbers)}><span>▶</span>{running ? `正在运行 ${activeProgress}%` : "开始运行"}</button>
                 </div>
               </footer>
             </div>
@@ -808,12 +885,13 @@ export default function App() {
           ) : null}
 
           {view === "guide" ? <GuideContent onPickTool={selectTool} /> : null}
-          {view === "settings" ? <SettingsContent outputFolder={outputFolder} libreOfficeOverride={libreOfficeOverride} libreOfficeDetected={libreOfficePath} tempDirectory={tempDirectory} namingRule={namingRule} conflictPolicy={conflictPolicy} ocrConfidence={ocrConfidence} imageDpi={imageDpi} historyCount={history.length} onChooseOutputFolder={selectOutputFolder} onChooseLibreOffice={selectLibreOfficePath} onClearLibreOffice={() => setLibreOfficeOverride("")} onChooseTempDirectory={selectTempDirectory} onClearTempDirectory={() => setTempDirectory("")} onNamingRuleChange={setNamingRule} onConflictPolicyChange={setConflictPolicy} onOcrConfidenceChange={setOcrConfidence} onImageDpiChange={setImageDpi} onShowWelcome={() => { localStorage.removeItem(GUIDE_KEY); setShowWelcome(true); }} onClearHistory={() => setHistory([])} /> : null}
+          {view === "settings" ? <SettingsContent outputFolder={outputFolder} libreOfficeOverride={libreOfficeOverride} libreOfficeDetected={libreOfficePath} tempDirectory={tempDirectory} namingRule={namingRule} conflictPolicy={conflictPolicy} ocrConfidence={ocrConfidence} imageDpi={imageDpi} autoOpenResult={autoOpenResult} historyCount={history.length} onChooseOutputFolder={selectOutputFolder} onChooseLibreOffice={selectLibreOfficePath} onClearLibreOffice={() => setLibreOfficeOverride("")} onChooseTempDirectory={selectTempDirectory} onClearTempDirectory={() => setTempDirectory("")} onNamingRuleChange={setNamingRule} onConflictPolicyChange={setConflictPolicy} onOcrConfidenceChange={setOcrConfidence} onImageDpiChange={setImageDpi} onAutoOpenResultChange={setAutoOpenResult} onDownloadLibreOffice={() => openUrl("https://www.libreoffice.org/download/download-libreoffice/")} onShowWelcome={() => { localStorage.removeItem(GUIDE_KEY); setShowWelcome(true); }} onClearHistory={() => setHistory([])} /> : null}
           {view === "about" ? <AboutContent onOpenWebsite={() => openUrl("https://www.fornowtoday.com")} onContact={() => openUrl(`mailto:${BRAND.email}`)} /> : null}
         </div>
       </main>
 
       {previewOpen ? <div className="drawer-layer" onMouseDown={(event) => { if (event.currentTarget === event.target) setPreviewOpen(false); }}><aside className="preview-drawer" aria-label="文件预览"><header><div><span>结果预览</span><b>{selectedJob?.name ?? "未选择文件"}</b></div><button className="icon-button" onClick={() => setPreviewOpen(false)} aria-label="关闭预览">×</button></header><FilePreview path={selectedJob?.output ?? selectedJob?.path} /><section className="preview-meta"><span>状态</span><b>{selectedJob ? STATUS_LABEL[selectedJob.status] : "无"}</b><p>{selectedJob?.detail}</p><small>{selectedJob?.output ?? selectedJob?.path}</small></section><footer>{selectedJob?.output ? <button className="button primary" onClick={() => openPath(selectedJob.output!)}>打开结果</button> : null}{outputFolder ? <button className="button ghost" onClick={() => openPath(outputFolder)}>打开文件夹</button> : null}</footer></aside></div> : null}
+      {toast ? <aside className={`result-toast ${toast.kind}`} role="status" aria-live="polite"><span className="toast-mark">{toast.kind === "success" ? "✓" : "!"}</span><div><b>{toast.title}</b><p>{toast.detail}</p><small title={toast.path}>{toast.path}</small><div className="toast-actions"><button onClick={() => IS_TAURI ? invoke("reveal_path", { path: toast.path }) : undefined}>打开所在位置</button>{toast.kind === "success" ? <button onClick={() => openPath(toast.path)}>打开结果</button> : null}</div></div><button className="toast-close" onClick={() => setToast(null)} aria-label="关闭提示">×</button></aside> : null}
       {showWelcome ? <WelcomeGuide onClose={() => closeWelcome()} onNeverShow={neverShowWelcome} onGuide={() => closeWelcome("guide")} /> : null}
     </div>
   );

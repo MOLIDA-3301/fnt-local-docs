@@ -85,7 +85,7 @@ export function GuideContent({ onPickTool }: { onPickTool: (id: ToolId) => void 
         <details open><summary>转成 PDF：Office、文本、HTML 与图片</summary><div><p>Word、PowerPoint、Excel、CSV 和 HTML 依赖本机 LibreOffice；TXT、Markdown 和图片使用内置引擎。需要把多种格式合成一个 PDF 时选择“文件转 PDF”，页序严格跟随队列。</p><p>图片合并前先在队列中选择文件，再用“上移 / 下移”调整顺序。单独转换多个文件并分别保存时使用“批量转 PDF”。</p></div></details>
         <details><summary>从 PDF 导出：Word、Excel、PPT、图片与文本</summary><div><p>PDF 转 Word 会优先尝试恢复段落、表格、图片和布局；扫描件自动回退 OCR。PDF 转 Excel 会生成识别表格及 Raw 原始数据，请检查低置信度标记。</p><p>PDF 转 PPT 以一页 PDF 对应一页幻灯片，保证视觉一致，但页面元素不能单独编辑。导出图片可调整 DPI，150 适合屏幕查看，300 适合打印。</p></div></details>
         <details><summary>OCR：图片和扫描 PDF 变成可编辑内容</summary><div><p>选择 TXT、Markdown 或 Word 可得到可编辑文字；选择“可搜索 PDF”会保留原页面并加入隐藏文字层。置信度阈值越高，被标记为需要人工检查的内容越多。</p><p>OCR 不限制页数，但长文档会逐页处理，需要更多时间和临时磁盘空间。</p></div></details>
-        <details><summary>PDF 整理与安全</summary><div><p>“整理 PDF 页面”用逗号和范围表示输出页序，例如 <code>3,1,2,5-8</code>；不写入的页面相当于删除。拆分可设置每个文件包含 N 页，结果自动打包 ZIP。</p><p>加密使用 AES-256；解密必须填写原密码。水印与页码可单独使用，也可同时启用。压缩以安全结构优化为主，不承诺明显降低以图片为主的 PDF。</p></div></details>
+        <details><summary>PDF 整理与安全</summary><div><p>“整理 PDF 页面”用逗号和范围表示输出页序，例如 <code>3,1,2,5-8</code>；不写入的页面相当于删除。拆分可设置每个文件包含 N 页，结果自动打包 ZIP。</p><p>加密使用 AES-256；解密必须填写原密码。水印支持文字、Logo、印章或自定义图片图案，并可同时添加页码。压缩以安全结构优化为主，不承诺明显降低以图片为主的 PDF。</p></div></details>
         <details><summary>批量队列、结果预览与历史</summary><div><p>批量模式可设置输出目录、命名规则和同名冲突方式。暂停或取消会在当前单文件完成后生效，单个文件失败不会中止后续任务。</p><p>完成后点击队列中的“预览”；窄窗口下预览会变为底部面板。转换历史只保存在本机，最多 500 条，可查看结果路径与失败原因。</p></div></details>
         <details><summary>常见问题排查</summary><div><p><b>Office 转换不可用：</b>安装 LibreOffice 后重新启动软件，左下角应显示“已就绪”。</p><p><b>开始运行是灰色：</b>检查当前工具支持的格式，并在队列中选中一个符合要求的文件；加密、解密还需要填写密码。</p><p><b>扫描 PDF 没有文字：</b>普通“PDF 转 TXT”只提取电子文字，请改用 OCR 分类中的工具。</p></div></details>
       </section>
@@ -106,6 +106,7 @@ type SettingsContentProps = {
   conflictPolicy: "rename" | "overwrite" | "skip";
   ocrConfidence: number;
   imageDpi: number;
+  autoOpenResult: boolean;
   historyCount: number;
   onChooseOutputFolder: () => void;
   onChooseLibreOffice: () => void;
@@ -116,6 +117,8 @@ type SettingsContentProps = {
   onConflictPolicyChange: (value: "rename" | "overwrite" | "skip") => void;
   onOcrConfidenceChange: (value: number) => void;
   onImageDpiChange: (value: number) => void;
+  onAutoOpenResultChange: (value: boolean) => void;
+  onDownloadLibreOffice: () => void;
   onShowWelcome: () => void;
   onClearHistory: () => void;
 };
@@ -140,11 +143,12 @@ export function SettingsContent(props: SettingsContentProps) {
           <label className="field"><span>默认输出文件夹</span><div className="field-with-button"><input value={props.outputFolder} readOnly placeholder="每次转换时再选择" /><button onClick={props.onChooseOutputFolder}>选择</button></div><small>留空时，每次运行都会询问保存位置。</small></label>
           <label className="field"><span>批量文件命名</span><input value={props.namingRule} onChange={(event) => props.onNamingRuleChange(event.currentTarget.value)} placeholder="{name}" /><small>可用变量：&#123;name&#125; 是原文件名，&#123;index&#125; 是队列序号。</small></label>
           <label className="field"><span>遇到同名文件</span><select value={props.conflictPolicy} onChange={(event) => props.onConflictPolicyChange(event.currentTarget.value as "rename" | "overwrite" | "skip")}><option value="rename">自动重命名（推荐）</option><option value="overwrite">覆盖已有文件</option><option value="skip">跳过，不生成</option></select></label>
+          <label className="check-field"><input type="checkbox" checked={props.autoOpenResult} onChange={(event) => props.onAutoOpenResultChange(event.currentTarget.checked)} /><span><b>转换完成后打开结果位置</b><small>默认开启。关闭后只显示成功提示，不再自动跳转到文件夹。</small></span></label>
         </section>
 
         <section className="settings-section">
           <header><span>02</span><div><h2>转换资源路径</h2><p>软件会自动寻找资源。只有自动检测失败时，才需要手动设置。</p></div></header>
-          <div className="resource-setting"><div><span>LibreOffice 程序</span><b>{engineLabel}</b><small>{props.libreOfficeOverride || props.libreOfficeDetected || "仅 Office、CSV 和 HTML 转 PDF 需要"}</small></div><div><button className="button ghost small" onClick={props.onChooseLibreOffice}>选择 soffice.exe</button>{props.libreOfficeOverride ? <button className="button text-button small" onClick={props.onClearLibreOffice}>恢复自动检测</button> : null}</div></div>
+          <div className="resource-setting"><div><span>LibreOffice 程序</span><b>{engineLabel}</b><small>{props.libreOfficeOverride || props.libreOfficeDetected || "仅 Office、CSV 和 HTML 转 PDF 需要"}</small></div><div>{!props.libreOfficeDetected ? <button className="button primary small" onClick={props.onDownloadLibreOffice}>免费下载</button> : null}<button className="button ghost small" onClick={props.onChooseLibreOffice}>选择 soffice.exe</button>{props.libreOfficeOverride ? <button className="button text-button small" onClick={props.onClearLibreOffice}>恢复自动检测</button> : null}</div></div>
           <div className="resource-setting"><div><span>临时文件夹</span><b>{props.tempDirectory ? "已自定义" : "跟随系统"}</b><small>{props.tempDirectory || "默认使用 Windows 临时目录，通常无需修改"}</small></div><div><button className="button ghost small" onClick={props.onChooseTempDirectory}>选择文件夹</button>{props.tempDirectory ? <button className="button text-button small" onClick={props.onClearTempDirectory}>恢复默认</button> : null}</div></div>
           <div className="built-in-note"><b>已经内置，无需设置</b><p>PDF 处理、OCR 引擎和中英文识别模型随安装包提供。无需安装 Python、Tesseract、FFmpeg 或 AVS3。</p></div>
         </section>

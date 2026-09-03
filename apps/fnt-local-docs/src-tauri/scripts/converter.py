@@ -340,13 +340,23 @@ def compress_pdf(source: Path, destination: Path, password: str | None) -> None:
         document.close()
 
 
-def stamp_pdf(source: Path, destination: Path, watermark: str | None, page_numbers: bool, password: str | None) -> None:
+def stamp_pdf(source: Path, destination: Path, watermark: str | None, watermark_image: str | None, page_numbers: bool, password: str | None) -> None:
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.lib.utils import ImageReader
     from reportlab.pdfgen.canvas import Canvas
 
-    if not watermark and not page_numbers:
-        raise ValueError("请填写水印文字或启用页码")
+    if not watermark and not watermark_image and not page_numbers:
+        raise ValueError("请填写水印文字、选择水印图片或启用页码")
+    image_reader = None
+    image_ratio = 1.0
+    if watermark_image:
+        image_path = Path(watermark_image)
+        if not image_path.is_file() or image_path.suffix.lower() not in IMAGE_EXTENSIONS:
+            raise ValueError("水印图片不存在或格式不支持")
+        image_reader = ImageReader(str(image_path))
+        image_width, image_height = image_reader.getSize()
+        image_ratio = image_height / max(image_width, 1)
     reader = _open_pdf(source, password)
     writer = PdfWriter()
     try:
@@ -368,6 +378,23 @@ def stamp_pdf(source: Path, destination: Path, watermark: str | None, page_numbe
             canvas.setFont("STSong-Light", max(24, min(54, width / 10)))
             canvas.drawCentredString(0, 0, watermark)
             canvas.restoreState()
+        if image_reader:
+            mark_width = min(width * 0.2, 130)
+            mark_height = mark_width * image_ratio
+            step_x = max(mark_width * 1.8, 150)
+            step_y = max(mark_height * 2.2, 130)
+            y = -step_y / 2
+            while y < height + step_y:
+                x = -step_x / 2
+                while x < width + step_x:
+                    canvas.saveState()
+                    canvas.setFillAlpha(0.16)
+                    canvas.translate(x + mark_width / 2, y + mark_height / 2)
+                    canvas.rotate(28)
+                    canvas.drawImage(image_reader, -mark_width / 2, -mark_height / 2, width=mark_width, height=mark_height, preserveAspectRatio=True, mask="auto")
+                    canvas.restoreState()
+                    x += step_x
+                y += step_y
         if page_numbers:
             canvas.setFillColorRGB(0.25, 0.25, 0.25)
             canvas.drawCentredString(width / 2, 20, f"第 {index} / {len(reader.pages)} 页")
@@ -734,6 +761,7 @@ def build_parser() -> argparse.ArgumentParser:
     stamp.add_argument("--source", required=True)
     stamp.add_argument("--destination", required=True)
     stamp.add_argument("--watermark")
+    stamp.add_argument("--watermark-image")
     stamp.add_argument("--page-numbers", action="store_true")
     stamp.add_argument("--password")
     text = subparsers.add_parser("pdf-to-text")
@@ -794,7 +822,7 @@ def main() -> None:
     elif args.command == "compress-pdf":
         compress_pdf(Path(args.source), Path(args.destination), args.password)
     elif args.command == "stamp-pdf":
-        stamp_pdf(Path(args.source), Path(args.destination), args.watermark, args.page_numbers, args.password)
+        stamp_pdf(Path(args.source), Path(args.destination), args.watermark, args.watermark_image, args.page_numbers, args.password)
     elif args.command == "pdf-to-text":
         pdf_to_text(Path(args.source), Path(args.destination), args.format, args.password)
     elif args.command == "files-to-pdf":

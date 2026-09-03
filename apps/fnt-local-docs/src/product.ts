@@ -45,7 +45,7 @@ export const TOOLS: ToolDefinition[] = [
   { id: "split-pdf", group: "pdf", icon: "拆", title: "拆分 PDF", description: "按单页或每 N 页拆分，结果自动打包 ZIP。", accepts: "PDF", requirement: "pdf" },
   { id: "organize-pdf", group: "pdf", icon: "页", title: "整理 PDF 页面", description: "提取、删除、重排和旋转页面，一次完成。", accepts: "PDF", requirement: "pdf" },
   { id: "compress-pdf", group: "pdf", icon: "压", title: "压缩 PDF", description: "进行无损结构优化，减少可清理的冗余数据。", accepts: "PDF", requirement: "pdf" },
-  { id: "stamp-pdf", group: "pdf", icon: "印", title: "水印与页码", description: "添加自定义文字水印、连续页码或同时添加。", accepts: "PDF", requirement: "pdf" },
+  { id: "stamp-pdf", group: "pdf", icon: "印", title: "水印与页码", description: "添加文字、图片或图案水印，也可加入连续页码。", accepts: "PDF · PNG/JPG/WebP 水印", requirement: "pdf" },
   { id: "encrypt-pdf", group: "pdf", icon: "锁", title: "加密 PDF", description: "使用 AES-256 密码加密保护文档。", accepts: "PDF", requirement: "pdf" },
   { id: "decrypt-pdf", group: "pdf", icon: "解", title: "解密 PDF", description: "输入原密码，导出不再加密的 PDF。", accepts: "加密 PDF", requirement: "pdf" },
 ];

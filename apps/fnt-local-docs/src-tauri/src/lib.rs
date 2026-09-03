@@ -3,6 +3,7 @@ use tauri_plugin_shell::ShellExt;
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 const SUPPORTED_EXTENSIONS: &[&str] = &["pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "csv", "txt", "md", "markdown", "html", "htm", "png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "mp3", "wav", "m4a", "ogg", "mp4", "webm", "mov", "mkv"];
 
@@ -32,7 +33,7 @@ fn build_identity() -> BuildIdentity {
         website: "https://www.fornowtoday.com",
         contact: "ouo@fornowtoday.com",
         version: env!("CARGO_PKG_VERSION"),
-        build_id: "DOCBOX-CN-2026-03",
+        build_id: "DOCBOX-CN-2026-04",
         license: "FNT 免费非商业许可 1.0",
     }
 }
@@ -57,6 +58,17 @@ fn configure_resource_paths(libreoffice_path: Option<String>, temp_directory: Op
         }
         None => std::env::remove_var("FNT_TEMP_PATH"),
     }
+    Ok(())
+}
+
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    let target = PathBuf::from(path);
+    if !target.exists() { return Err("结果文件不存在，可能已被移动或删除".into()); }
+    Command::new("explorer.exe")
+        .arg(format!("/select,{}", target.to_string_lossy()))
+        .spawn()
+        .map_err(|error| format!("无法打开结果位置：{error}"))?;
     Ok(())
 }
 
@@ -217,9 +229,10 @@ async fn compress_pdf(app: tauri::AppHandle, source: String, destination: String
 }
 
 #[tauri::command]
-async fn stamp_pdf(app: tauri::AppHandle, source: String, destination: String, watermark: Option<String>, page_numbers: bool, password: Option<String>) -> Result<String, String> {
+async fn stamp_pdf(app: tauri::AppHandle, source: String, destination: String, watermark: Option<String>, watermark_image: Option<String>, page_numbers: bool, password: Option<String>) -> Result<String, String> {
     let mut args = vec!["stamp-pdf".into(), "--source".into(), source, "--destination".into(), destination.clone()];
     if let Some(watermark) = watermark { if !watermark.trim().is_empty() { args.push("--watermark".into()); args.push(watermark); } }
+    if let Some(image) = watermark_image { if !image.trim().is_empty() { args.push("--watermark-image".into()); args.push(image); } }
     if page_numbers { args.push("--page-numbers".into()); }
     if let Some(password) = password { args.push("--password".into()); args.push(password); }
     run_converter(&app, args, destination).await
@@ -287,7 +300,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![build_identity, configure_resource_paths, list_supported_files, expand_dropped_paths, validate_batch_inputs, resolve_output_path, read_preview_text, merge_images_to_pdf, images_to_scan_pdf, merge_pdfs, split_pdf, encrypt_pdf, decrypt_pdf, organize_pdf, compress_pdf, stamp_pdf, pdf_to_text, files_to_pdf, conversion_engine_status, pdf_to_images, pdf_to_word, ocr_document, pdf_to_excel, pdf_to_ppt])
+        .invoke_handler(tauri::generate_handler![build_identity, configure_resource_paths, reveal_path, list_supported_files, expand_dropped_paths, validate_batch_inputs, resolve_output_path, read_preview_text, merge_images_to_pdf, images_to_scan_pdf, merge_pdfs, split_pdf, encrypt_pdf, decrypt_pdf, organize_pdf, compress_pdf, stamp_pdf, pdf_to_text, files_to_pdf, conversion_engine_status, pdf_to_images, pdf_to_word, ocr_document, pdf_to_excel, pdf_to_ppt])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
