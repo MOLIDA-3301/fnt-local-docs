@@ -32,6 +32,11 @@ def find_libreoffice() -> Path | None:
     return next((candidate for candidate in candidates if candidate and candidate.is_file()), None)
 
 
+def temporary_directory() -> tempfile.TemporaryDirectory[str]:
+    configured = os.environ.get("FNT_TEMP_PATH")
+    return tempfile.TemporaryDirectory(dir=configured or None)
+
+
 def validate_batch_size(sources: list[Path]) -> None:
     total = 0
     for source in sources:
@@ -158,7 +163,7 @@ def office_to_pdf(source: Path, destination: Path) -> None:
     if not executable:
         raise RuntimeError("未检测到 LibreOffice。请先安装 LibreOffice，重新打开软件后再转换 Office、CSV 或 HTML 文件。")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory() as temporary:
+    with temporary_directory() as temporary:
         temp_dir = Path(temporary)
         output_dir = temp_dir / "output"
         profile_dir = temp_dir / "profile"
@@ -203,7 +208,7 @@ def files_to_pdf(sources: list[Path], destination: Path) -> None:
         raise ValueError("至少需要一个文件")
     validate_batch_size(sources)
     writer = PdfWriter()
-    with tempfile.TemporaryDirectory() as temporary:
+    with temporary_directory() as temporary:
         temp_dir = Path(temporary)
         for index, source in enumerate(sources):
             converted = temp_dir / f"{index:05d}.pdf"
@@ -235,7 +240,7 @@ def split_pdf(source: Path, destination: Path, every: int, password: str | None)
     if reader.is_encrypted and not reader.decrypt(password or ""):
         raise ValueError("PDF 密码不正确")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory() as temp:
+    with temporary_directory() as temp:
         temp_dir = Path(temp)
         parts: list[Path] = []
         for start in range(0, len(reader.pages), every):
@@ -402,7 +407,7 @@ def pdf_to_images(source: Path, destination: Path, dpi: int, image_format: str, 
             raise ValueError("PDF 密码不正确")
         destination.parent.mkdir(parents=True, exist_ok=True)
         scale = dpi / 72
-        with tempfile.TemporaryDirectory() as temporary:
+        with temporary_directory() as temporary:
             temp_dir = Path(temporary)
             rendered: list[Path] = []
             for index, page in enumerate(document, 1):
@@ -619,11 +624,11 @@ def pdf_to_excel(source: Path, destination: Path, password: str | None, min_conf
                     cell.fill = header_fill
                 if score < min_confidence:
                     cell.fill = low_fill
-                    cell.comment = Comment(f"OCR 置信度 {score:.1%}，请人工核对。来源：{source_kind}", "FNT Local Docs")
+                    cell.comment = Comment(f"OCR 置信度 {score:.1%}，请人工核对。来源：{source_kind}", "FNT")
         for column in sheet.columns:
             maximum = min(48, max(10, max(len(str(cell.value or "")) for cell in column) + 2))
             sheet.column_dimensions[column[0].column_letter].width = maximum
-        sheet["A1"].comment = Comment(f"来源页：{page_number}；提取方式：{source_kind}。空白单元格可能对应合并区域，请结合 Raw 表核对。", "FNT Local Docs")
+        sheet["A1"].comment = Comment(f"来源页：{page_number}；提取方式：{source_kind}。空白单元格可能对应合并区域，请结合 Raw 表核对。", "FNT")
 
     raw = workbook.create_sheet("Raw")
     for row in raw_rows:
@@ -665,7 +670,7 @@ def pdf_to_ppt(source: Path, destination: Path, password: str | None, dpi: int) 
         relationship_id = presentation.slides._sldIdLst[-1].rId
         presentation.part.drop_rel(relationship_id)
         del presentation.slides._sldIdLst[-1]
-    with tempfile.TemporaryDirectory() as temporary:
+    with temporary_directory() as temporary:
         temp_dir = Path(temporary)
         for index, page in enumerate(pdf, 1):
             pixmap = page.get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72), alpha=False)

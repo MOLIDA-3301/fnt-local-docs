@@ -3,8 +3,10 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { AboutContent, FntMark, GuideContent, SettingsContent, ToolGrid, WelcomeGuide } from "./components/ProductUi";
+import { BRAND } from "./brand";
+import { GROUP_COPY, TOOLS, type ToolId, type ViewId } from "./product";
 import "./App.css";
-import "./engine.css";
 
 type JobStatus = "waiting" | "running" | "paused" | "completed" | "failed" | "cancelled";
 type Job = {
@@ -19,9 +21,20 @@ type Job = {
 };
 type HistoryEntry = { id: number; source: string; time: string; output?: string; error?: string };
 type LocalFile = { path: string; size: number };
+type AppSettings = {
+  outputFolder: string;
+  libreOfficeOverride: string;
+  tempDirectory: string;
+  namingRule: string;
+  conflictPolicy: "rename" | "overwrite" | "skip";
+  ocrConfidence: number;
+  imageDpi: number;
+};
 
 const STORAGE_KEY = "fnt.queue.v2";
 const HISTORY_KEY = "fnt.history.v1";
+const GUIDE_KEY = "fnt.guide.seen.v3";
+const SETTINGS_KEY = "docbox.settings.v1";
 const IS_TAURI = "__TAURI_INTERNALS__" in window;
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff"]);
 const OFFICE_EXTENSIONS = new Set(["doc", "docx", "ppt", "pptx", "xls", "xlsx", "csv", "html", "htm"]);
@@ -53,6 +66,25 @@ function loadHistory(): HistoryEntry[] {
   }
 }
 
+const DEFAULT_SETTINGS: AppSettings = {
+  outputFolder: "",
+  libreOfficeOverride: "",
+  tempDirectory: "",
+  namingRule: "{name}",
+  conflictPolicy: "rename",
+  ocrConfidence: 80,
+  imageDpi: 150,
+};
+
+function loadSettings(): AppSettings {
+  try {
+    const saved = localStorage.getItem(SETTINGS_KEY);
+    return saved ? { ...DEFAULT_SETTINGS, ...(JSON.parse(saved) as Partial<AppSettings>) } : DEFAULT_SETTINGS;
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+}
+
 function fileName(path: string) {
   return path.split(/[\\/]/).pop() ?? path;
 }
@@ -76,8 +108,22 @@ function jobKind(path: string) {
   return "暂不支持的格式";
 }
 
+function toolMatchesPath(toolId: ToolId, path: string) {
+  const suffix = extension(path);
+  if (["mixed-pdf", "batch-pdf"].includes(toolId)) return TO_PDF_EXTENSIONS.has(suffix);
+  if (toolId === "word-pdf") return ["doc", "docx"].includes(suffix);
+  if (toolId === "ppt-pdf") return ["ppt", "pptx"].includes(suffix);
+  if (toolId === "sheet-pdf") return ["xls", "xlsx", "csv"].includes(suffix);
+  if (toolId === "text-pdf") return ["txt", "md", "markdown"].includes(suffix);
+  if (toolId === "html-pdf") return ["html", "htm"].includes(suffix);
+  if (["images-pdf", "scan-pdf"].includes(toolId)) return isImage(path);
+  if (toolId.startsWith("ocr-")) return isPdf(path) || isImage(path);
+  return isPdf(path);
+}
+
 const INITIAL_JOBS = loadJobs();
 const INITIAL_HISTORY = loadHistory();
+const INITIAL_SETTINGS = loadSettings();
 
 function FilePreview({ path }: { path?: string }) {
   const [content, setContent] = useState("");
@@ -110,17 +156,23 @@ function FilePreview({ path }: { path?: string }) {
 export default function App() {
   const [jobs, setJobs] = useState<Job[]>(INITIAL_JOBS);
   const [history, setHistory] = useState<HistoryEntry[]>(INITIAL_HISTORY);
+  const [view, setView] = useState<ViewId>("home");
+  const [activeToolId, setActiveToolId] = useState<ToolId>("mixed-pdf");
+  const [showWelcome, setShowWelcome] = useState(() => localStorage.getItem(GUIDE_KEY) !== "1");
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(INITIAL_JOBS[0]?.id ?? null);
   const [pagesPerFile, setPagesPerFile] = useState(1);
-  const [imageDpi, setImageDpi] = useState(150);
-  const [ocrConfidence, setOcrConfidence] = useState(80);
+  const [imageDpi, setImageDpi] = useState(INITIAL_SETTINGS.imageDpi);
+  const [ocrConfidence, setOcrConfidence] = useState(INITIAL_SETTINGS.ocrConfidence);
   const [pageSpec, setPageSpec] = useState("");
   const [rotation, setRotation] = useState(0);
   const [watermark, setWatermark] = useState("");
   const [pageNumbers, setPageNumbers] = useState(false);
-  const [outputFolder, setOutputFolder] = useState("");
-  const [namingRule, setNamingRule] = useState("{name}");
-  const [conflictPolicy, setConflictPolicy] = useState<"rename" | "overwrite" | "skip">("rename");
+  const [outputFolder, setOutputFolder] = useState(INITIAL_SETTINGS.outputFolder);
+  const [libreOfficeOverride, setLibreOfficeOverride] = useState(INITIAL_SETTINGS.libreOfficeOverride);
+  const [tempDirectory, setTempDirectory] = useState(INITIAL_SETTINGS.tempDirectory);
+  const [namingRule, setNamingRule] = useState(INITIAL_SETTINGS.namingRule);
+  const [conflictPolicy, setConflictPolicy] = useState<"rename" | "overwrite" | "skip">(INITIAL_SETTINGS.conflictPolicy);
   const [batchStatus, setBatchStatus] = useState<"idle" | "running" | "paused" | "cancelled">("idle");
   const pauseRef = useRef(false);
   const cancelRef = useRef(false);
@@ -132,11 +184,20 @@ export default function App() {
   ));
   const [password, setPassword] = useState("");
   const [libreOfficePath, setLibreOfficePath] = useState<string | null | undefined>(undefined);
+  const activeTool = TOOLS.find((tool) => tool.id === activeToolId) ?? TOOLS[0];
   const selectedJob = jobs.find((job) => job.id === selectedId);
   const imageJobs = useMemo(() => jobs.filter((job) => isImage(job.path)), [jobs]);
   const pdfJobs = useMemo(() => jobs.filter((job) => isPdf(job.path)), [jobs]);
   const completedCount = useMemo(() => jobs.filter((job) => job.status === "completed").length, [jobs]);
   const toPdfJobs = useMemo(() => jobs.filter((job) => TO_PDF_EXTENSIONS.has(extension(job.path))), [jobs]);
+  const activeInputJobs = useMemo(() => jobs.filter((job) => toolMatchesPath(activeToolId, job.path)), [activeToolId, jobs]);
+  const canRunActiveTool = activeTool.requirement === "image"
+    ? imageJobs.length > 0
+    : activeTool.requirement === "pdf"
+      ? Boolean(selectedJob && toolMatchesPath(activeToolId, selectedJob.path))
+      : activeTool.requirement === "ocr"
+        ? Boolean(selectedJob && toolMatchesPath(activeToolId, selectedJob.path))
+        : activeInputJobs.length > 0;
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(jobs));
@@ -144,8 +205,27 @@ export default function App() {
   }, [jobs]);
 
   useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(".main-content")?.scrollTo({ top: 0, behavior: "auto" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [view, activeToolId]);
+
+  useEffect(() => {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 500)));
   }, [history]);
+
+  useEffect(() => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      outputFolder,
+      libreOfficeOverride,
+      tempDirectory,
+      namingRule,
+      conflictPolicy,
+      ocrConfidence,
+      imageDpi,
+    } satisfies AppSettings));
+  }, [conflictPolicy, imageDpi, libreOfficeOverride, namingRule, ocrConfidence, outputFolder, tempDirectory]);
 
   useEffect(() => {
     const additions: HistoryEntry[] = [];
@@ -172,10 +252,13 @@ export default function App() {
       setLibreOfficePath(null);
       return;
     }
-    invoke<{ libreoffice: string | null }>("conversion_engine_status")
+    invoke("configure_resource_paths", {
+      libreofficePath: libreOfficeOverride || null,
+      tempDirectory: tempDirectory || null,
+    }).then(() => invoke<{ libreoffice: string | null }>("conversion_engine_status"))
       .then((status) => setLibreOfficePath(status.libreoffice))
       .catch(() => setLibreOfficePath(null));
-  }, []);
+  }, [libreOfficeOverride, tempDirectory]);
 
   useEffect(() => {
     if (!IS_TAURI) return;
@@ -213,9 +296,17 @@ export default function App() {
       directory: false,
       filters: [{ name: "支持的文件", extensions: ["pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "csv", "txt", "md", "markdown", "html", "htm", "png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "mp3", "mp4"] }],
     });
-    if (!selected) return;
+    if (!selected) return [];
     const paths = Array.isArray(selected) ? selected : [selected];
     addPaths(paths);
+    return paths;
+  }
+
+  async function quickStart() {
+    const paths = await chooseFiles();
+    if (paths.length === 0) return;
+    setActiveToolId("mixed-pdf");
+    setView("workspace");
   }
 
   async function chooseFolder() {
@@ -277,14 +368,14 @@ export default function App() {
     }
   }
 
-  async function convertQueueToPdf() {
-    if (toPdfJobs.length === 0) return;
-    const destination = await save({ defaultPath: toPdfJobs.length === 1 ? `${toPdfJobs[0].name.replace(/\.[^.]+$/, "")}.pdf` : "合并转换.pdf", filters: [{ name: "PDF 文档", extensions: ["pdf"] }] });
+  async function convertQueueToPdf(sourceJobs = toPdfJobs) {
+    if (sourceJobs.length === 0) return;
+    const destination = await save({ defaultPath: sourceJobs.length === 1 ? `${sourceJobs[0].name.replace(/\.[^.]+$/, "")}.pdf` : "合并转换.pdf", filters: [{ name: "PDF 文档", extensions: ["pdf"] }] });
     if (!destination) return;
-    const ids = new Set(toPdfJobs.map((job) => job.id));
+    const ids = new Set(sourceJobs.map((job) => job.id));
     setJobs((current) => current.map((job) => ids.has(job.id) ? { ...job, status: "running", progress: 35, detail: "正在按队列顺序转成 PDF" } : job));
     try {
-      const output = await invoke<string>("files_to_pdf", { sources: toPdfJobs.map((job) => job.path), destination });
+      const output = await invoke<string>("files_to_pdf", { sources: sourceJobs.map((job) => job.path), destination });
       setJobs((current) => current.map((job) => ids.has(job.id) ? { ...job, status: "completed", progress: 100, detail: "已转成 PDF", output } : job));
     } catch (error) {
       const detail = String(error);
@@ -297,6 +388,18 @@ export default function App() {
     if (!selected || Array.isArray(selected)) return null;
     setOutputFolder(selected);
     return selected;
+  }
+
+  async function selectLibreOfficePath() {
+    const selected = await open({ multiple: false, directory: false, filters: [{ name: "LibreOffice 程序", extensions: ["exe"] }] });
+    if (!selected || Array.isArray(selected)) return;
+    setLibreOfficeOverride(selected);
+  }
+
+  async function selectTempDirectory() {
+    const selected = await open({ multiple: false, directory: true });
+    if (!selected || Array.isArray(selected)) return;
+    setTempDirectory(selected);
   }
 
   async function runBatchPdf() {
@@ -494,29 +597,224 @@ export default function App() {
     }
   }
 
+  function selectTool(id: ToolId) {
+    setActiveToolId(id);
+    setView("workspace");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function closeWelcome(nextView?: ViewId) {
+    setShowWelcome(false);
+    if (nextView) setView(nextView);
+  }
+
+  function neverShowWelcome() {
+    localStorage.setItem(GUIDE_KEY, "1");
+    setShowWelcome(false);
+  }
+
+  async function runActiveTool() {
+    switch (activeToolId) {
+      case "mixed-pdf":
+      case "word-pdf":
+      case "ppt-pdf":
+      case "sheet-pdf":
+      case "text-pdf":
+      case "html-pdf": await convertQueueToPdf(activeInputJobs); break;
+      case "batch-pdf": await runBatchPdf(); break;
+      case "images-pdf": await mergeImages(); break;
+      case "scan-pdf": await createScanStylePdf(); break;
+      case "pdf-word": await exportSelectedPdf("word"); break;
+      case "pdf-excel": await exportSelectedExcel(); break;
+      case "pdf-ppt": await exportSelectedPpt(); break;
+      case "pdf-text": await exportSelectedText("text"); break;
+      case "pdf-markdown": await exportSelectedText("markdown"); break;
+      case "pdf-images": await exportSelectedPdf("images"); break;
+      case "ocr-text": await runOcr("text"); break;
+      case "ocr-markdown": await runOcr("markdown"); break;
+      case "ocr-word": await runOcr("docx"); break;
+      case "ocr-searchable": await runOcr("searchable-pdf"); break;
+      case "merge-pdf": await mergeQueuedPdfs(); break;
+      case "split-pdf": await runSelectedPdfAction("split_pdf"); break;
+      case "organize-pdf": await runPdfUtility("organize_pdf"); break;
+      case "compress-pdf": await runPdfUtility("compress_pdf"); break;
+      case "stamp-pdf": await runPdfUtility("stamp_pdf"); break;
+      case "encrypt-pdf": await runSelectedPdfAction("encrypt_pdf"); break;
+      case "decrypt-pdf": await runSelectedPdfAction("decrypt_pdf"); break;
+    }
+  }
+
+  const running = batchStatus === "running" || jobs.some((job) => job.status === "running");
+  const needsLibreOffice = ["mixed-pdf", "batch-pdf", "word-pdf", "ppt-pdf", "sheet-pdf", "html-pdf"].includes(activeToolId);
+  const needsDpi = activeToolId === "pdf-images" || activeToolId === "pdf-ppt";
+  const needsOcr = activeTool.group === "ocr" || activeToolId === "pdf-excel";
+  const needsPassword = activeToolId === "encrypt-pdf" || activeToolId === "decrypt-pdf";
+
   return (
-    <main className="app">
-      <aside>
-        <div className="brand">F <span><b>FNT Local Docs</b><small>本地文档工作台</small></span></div>
-        <button className="primary" onClick={chooseFiles}>＋ 添加文件</button>
-        <button className="secondary-wide" onClick={chooseFolder}>＋ 添加整个文件夹</button>
-        <nav><b>转换队列 <i>{jobs.length}</i></b><b>本地历史 <i>{history.length}</i></b></nav>
-        <p className="safe">● 文件仅在此设备处理<br />不会上传至服务器<br /><span className={libreOfficePath ? "engine-ok" : "engine-missing"}>LibreOffice：{libreOfficePath === undefined ? "检测中" : libreOfficePath ? "已就绪" : "未安装"}</span>{libreOfficePath === null ? <button onClick={() => openUrl("https://www.libreoffice.org/download/download-libreoffice/")}>安装转换引擎</button> : null}</p>
+    <div className="app-shell">
+      <aside className="sidebar">
+        <FntMark />
+        <nav className="main-nav" aria-label="主要功能">
+          <button className={view === "home" ? "active" : ""} onClick={() => setView("home")}><span>⌂</span>首页</button>
+          <p>文档工具</p>
+          <button className={view === "convert" || (view === "workspace" && activeTool.group === "convert" && activeToolId !== "batch-pdf") ? "active" : ""} onClick={() => setView("convert")}><span>↗</span>转成 PDF</button>
+          <button className={view === "export" || (view === "workspace" && activeTool.group === "export") ? "active" : ""} onClick={() => setView("export")}><span>↙</span>从 PDF 导出</button>
+          <button className={view === "ocr" || (view === "workspace" && activeTool.group === "ocr") ? "active" : ""} onClick={() => setView("ocr")}><span>◎</span>OCR 识别</button>
+          <button className={view === "pdf" || (view === "workspace" && activeTool.group === "pdf") ? "active" : ""} onClick={() => setView("pdf")}><span>◇</span>PDF 工具</button>
+          <p>任务管理</p>
+          <button className={view === "workspace" && activeToolId === "batch-pdf" ? "active" : ""} onClick={() => selectTool("batch-pdf")}><span>≡</span>批量队列<i>{jobs.length}</i></button>
+          <button className={view === "history" ? "active" : ""} onClick={() => setView("history")}><span>↻</span>转换历史<i>{history.length}</i></button>
+        </nav>
+        <div className="sidebar-bottom">
+          <button className={view === "settings" ? "help-link active" : "help-link"} onClick={() => setView("settings")}><span>⚙</span>设置</button>
+          <button className={view === "guide" ? "help-link active" : "help-link"} onClick={() => setView("guide")}><span>?</span>使用教程</button>
+          <button className={view === "about" ? "help-link active" : "help-link"} onClick={() => setView("about")}><span>i</span>关于与声明</button>
+          <section className="privacy-card"><b><i />本机处理</b><span>无需登录</span></section>
+          <section className={libreOfficePath ? "engine-card ready" : "engine-card"}>
+            <span>Office 转换引擎</span>
+            <b>{libreOfficePath === undefined ? "正在检测…" : libreOfficePath ? "LibreOffice 已就绪" : "LibreOffice 未安装"}</b>
+            {libreOfficePath === null ? <button onClick={() => openUrl("https://www.libreoffice.org/download/download-libreoffice/")}>前往安装</button> : null}
+          </section>
+        </div>
       </aside>
-      <section className="work">
-        <header><div><small>工作台 / 转换队列</small><h1>本地转换任务</h1></div><div className="header-actions"><button className="primary" onClick={runBatchPdf} disabled={toPdfJobs.length === 0 || batchStatus === "running" || batchStatus === "paused"}>批量转成 PDF</button><button onClick={togglePause} disabled={batchStatus !== "running" && batchStatus !== "paused"}>{batchStatus === "paused" ? "继续" : "暂停"}</button><button onClick={cancelBatch} disabled={batchStatus !== "running" && batchStatus !== "paused"}>取消</button><button onClick={mergeQueuedPdfs} disabled={pdfJobs.length === 0}>合并 PDF</button><button onClick={mergeImages} disabled={imageJobs.length === 0}>仅合并图片</button><button onClick={createScanStylePdf} disabled={imageJobs.length === 0}>扫描件风格</button></div></header>
-        <div className="cards"><p>队列任务<strong>{jobs.length}</strong><small>{completedCount} 个已完成</small></p><p>图片 / PDF<strong>{imageJobs.length} / {pdfJobs.length}</strong><small>输出顺序跟随队列</small></p><p>处理模式<strong>离线</strong><small>文件不上传服务器</small></p></div>
-        <button className="drop" onClick={chooseFiles}><b>选择文件</b><span>图片、TXT、Markdown 可直接转 PDF；Office、CSV、HTML 使用本机 LibreOffice</span><em>浏览本机</em></button>
-        <section className="batch-settings"><label>输出文件夹<input value={outputFolder} readOnly placeholder="首次批量处理时选择" /></label><button onClick={selectOutputFolder}>选择</button><label>命名规则<input value={namingRule} onChange={(event) => setNamingRule(event.currentTarget.value)} placeholder="{name}_{index}" /></label><label>同名文件<select value={conflictPolicy} onChange={(event) => setConflictPolicy(event.currentTarget.value as "rename" | "overwrite" | "skip")}><option value="rename">自动重命名</option><option value="overwrite">覆盖</option><option value="skip">跳过</option></select></label></section>
-        <div className="queue-heading"><h2>转换队列</h2><div><button onClick={() => moveSelected(-1)} disabled={!selectedJob}>上移</button><button onClick={() => moveSelected(1)} disabled={!selectedJob}>下移</button><button onClick={removeSelected} disabled={!selectedJob}>移除</button><button onClick={retryFailed} disabled={!jobs.some((job) => job.status === "failed" || job.status === "cancelled")}>重试失败项</button></div></div>
-        {jobs.length === 0 ? <div className="empty">添加图片后即可生成第一个本地 PDF。</div> : jobs.map((job) => (
-          <button className={job.id === selectedId ? "job on" : "job"} key={job.id} onClick={() => setSelectedId(job.id)}>
-            <strong>{isImage(job.path) ? "IMG" : "DOC"}</strong><span><b>{job.name}</b><small>{job.kind}</small>{job.progress > 0 && job.progress < 100 ? <i><em style={{ width: `${job.progress}%` }} /></i> : null}</span><label className={job.status}>{STATUS_LABEL[job.status]}<small>{job.detail}</small></label>
-          </button>
-        ))}
-        <details className="history"><summary>本地转换历史（{history.length}）</summary><div className="history-head"><small>仅保存在本机，最多 500 条</small><button onClick={() => setHistory([])} disabled={history.length === 0}>清空历史</button></div>{history.length === 0 ? <p>暂无历史记录。</p> : history.slice(0, 50).map((entry) => <article key={entry.id}><b>{fileName(entry.source)}</b><small>{new Date(entry.time).toLocaleString()} · {entry.source}</small><span className={entry.error ? "history-error" : "history-output"}>{entry.error ?? entry.output}</span>{entry.output ? <button onClick={() => openPath(entry.output!)}>打开</button> : null}</article>)}</details>
-      </section>
-      <aside className="preview"><div><small>结果与详情</small><b>{selectedJob?.name ?? "尚未选择文件"}</b></div><article><b>FNT</b><h3>{selectedJob?.kind ?? "本地文档转换"}</h3><p>{selectedJob?.detail ?? "从左侧添加文件开始。"}</p><FilePreview path={selectedJob?.output ?? selectedJob?.path} />{selectedJob && isPdf(selectedJob.path) ? <section className="pdf-tools"><label>每组页数<input type="number" min="1" value={pagesPerFile} onChange={(event) => setPagesPerFile(Math.max(1, Number(event.currentTarget.value) || 1))} /></label><label>图片 / PPT 导出 DPI<input type="number" min="72" max="600" value={imageDpi} onChange={(event) => setImageDpi(Math.min(600, Math.max(72, Number(event.currentTarget.value) || 150)))} /></label><label>PDF 密码<input type="password" value={password} onChange={(event) => setPassword(event.currentTarget.value)} placeholder="加密或解密时填写" /></label><div><button onClick={() => exportSelectedText("text")}>导出 TXT</button><button onClick={() => exportSelectedText("markdown")}>导出 Markdown</button><button onClick={() => exportSelectedPdf("images")}>导出图片 ZIP</button><button onClick={() => exportSelectedPdf("word")}>导出 Word</button><button onClick={exportSelectedExcel}>导出 Excel</button><button onClick={exportSelectedPpt}>导出 PPT</button><button onClick={() => runSelectedPdfAction("split_pdf")}>拆分 ZIP</button><button onClick={() => runSelectedPdfAction("encrypt_pdf")} disabled={!password}>AES-256 加密</button><button onClick={() => runSelectedPdfAction("decrypt_pdf")} disabled={!password}>密码解密</button></div><label>页码范围 / 顺序<input value={pageSpec} onChange={(event) => setPageSpec(event.currentTarget.value)} placeholder="如 3,1,2,5-8；留空表示全部" /></label><label>统一旋转<select value={rotation} onChange={(event) => setRotation(Number(event.currentTarget.value))}><option value={0}>不旋转</option><option value={90}>顺时针 90°</option><option value={180}>180°</option><option value={270}>顺时针 270°</option></select></label><label>水印文字<input value={watermark} onChange={(event) => setWatermark(event.currentTarget.value)} placeholder="可留空，仅添加页码" /></label><label className="check"><input type="checkbox" checked={pageNumbers} onChange={(event) => setPageNumbers(event.currentTarget.checked)} /> 添加页码</label><div><button onClick={() => runPdfUtility("organize_pdf")}>提取 / 重排 / 旋转</button><button onClick={() => runPdfUtility("compress_pdf")}>压缩 PDF</button><button onClick={() => runPdfUtility("stamp_pdf")} disabled={!watermark && !pageNumbers}>添加水印 / 页码</button></div></section> : null}{selectedJob && (isPdf(selectedJob.path) || isImage(selectedJob.path)) ? <section className="pdf-tools"><label>低置信度阈值（%）<input type="number" min="50" max="99" value={ocrConfidence} onChange={(event) => setOcrConfidence(Math.min(99, Math.max(50, Number(event.currentTarget.value) || 80)))} /></label><div><button onClick={() => runOcr("text")}>OCR → TXT</button><button onClick={() => runOcr("markdown")}>OCR → Markdown</button><button onClick={() => runOcr("docx")}>OCR → Word</button><button onClick={() => runOcr("searchable-pdf")}>生成可搜索 PDF</button></div></section> : null}<hr /><p className="path">{selectedJob?.output ?? selectedJob?.path ?? "预览不会将文件发送到网络。"}</p></article><footer><span>{selectedJob ? STATUS_LABEL[selectedJob.status] : "空队列"}</span><div>{selectedJob?.output ? <button onClick={() => openPath(selectedJob.output!)}>打开结果</button> : null}{outputFolder ? <button onClick={() => openPath(outputFolder)}>打开输出文件夹</button> : null}<button className="primary" onClick={convertQueueToPdf} disabled={toPdfJobs.length === 0}>合并转 PDF</button></div></footer></aside>
-    </main>
+
+      <main className="main-content">
+        <header className="topbar">
+          <div><span>{BRAND.shortName} / {view === "workspace" ? activeTool.title : view === "home" ? "首页" : view === "history" ? "转换历史" : view === "settings" ? "设置" : view === "guide" ? "使用教程" : view === "about" ? "关于与声明" : GROUP_COPY[view as keyof typeof GROUP_COPY]?.title}</span></div>
+          <div className="topbar-actions">
+            <button className="button ghost" onClick={() => setView("guide")}>使用帮助</button>
+          </div>
+        </header>
+
+        <div className="page-content">
+          {view === "home" ? (
+            <div className="home-page">
+              <section className="home-hero">
+                <div>
+                  <p className="eyebrow">DOCBOX · 纸间文档盒</p>
+                  <h1>文档转换，就这么简单。</h1>
+                  <p>转换、识别、整理，一看就会。选择任务，添加文件，然后开始。</p>
+                  <div className="hero-actions"><button className="button primary" onClick={() => setView("convert")}>浏览全部工具</button><button className="button ghost" onClick={() => setView("guide")}>查看使用教程</button></div>
+                </div>
+                <div className="hero-status">
+                  <span>工作台概览</span><b>所有工具都在这里</b>
+                  <dl><div><dt>{TOOLS.length}</dt><dd>个工具入口</dd></div><div><dt>{jobs.length}</dt><dd>个队列任务</dd></div><div><dt>{completedCount}</dt><dd>个已完成</dd></div></dl>
+                  <button className="button primary hero-quick-start" onClick={quickStart}>＋ 添加文件并开始</button>
+                </div>
+              </section>
+
+              <section className="section-block">
+                <div className="section-heading"><div><p className="eyebrow">按任务查找</p><h2>你想做什么？</h2></div><span>四大类 · 全部能力一目了然</span></div>
+                <div className="category-grid">
+                  {(Object.keys(GROUP_COPY) as Array<keyof typeof GROUP_COPY>).map((group) => (
+                    <button key={group} className={`category-card category-${group}`} onClick={() => setView(group)}>
+                      <span className="category-symbol">{group === "convert" ? "↗" : group === "export" ? "↙" : group === "ocr" ? "◎" : "◇"}</span>
+                      <b>{GROUP_COPY[group].title}</b><small>{GROUP_COPY[group].subtitle}</small>
+                      <em>{TOOLS.filter((tool) => tool.group === group).length} 个工具 <i>→</i></em>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="section-block">
+                <div className="section-heading"><div><p className="eyebrow">常用工具</p><h2>直接开始</h2></div></div>
+                <ToolGrid tools={TOOLS.filter((tool) => ["mixed-pdf", "pdf-word", "pdf-excel", "ocr-searchable", "images-pdf", "merge-pdf", "split-pdf", "compress-pdf"].includes(tool.id))} onSelect={selectTool} />
+              </section>
+
+              <section className="capability-map">
+                <div><b>转成 PDF</b><span>Word · PPT · Excel · CSV · HTML · TXT · Markdown · 图片 · 混合合并</span></div>
+                <div><b>从 PDF 导出</b><span>Word · Excel · PPT · TXT · Markdown · 逐页图片</span></div>
+                <div><b>OCR</b><span>TXT · Markdown · Word · 可搜索 PDF · 中文 · 英文</span></div>
+                <div><b>PDF 工具</b><span>合并 · 拆分 · 重排 · 旋转 · 压缩 · 水印 · 页码 · 加密 · 解密</span></div>
+              </section>
+            </div>
+          ) : null}
+
+          {(["convert", "export", "ocr", "pdf"] as ViewId[]).includes(view) ? (
+            <div className="tools-page">
+              <section className={`page-intro intro-${view}`}>
+                <p className="eyebrow">工具分类</p>
+                <h1>{GROUP_COPY[view as keyof typeof GROUP_COPY].title}</h1>
+                <p>{GROUP_COPY[view as keyof typeof GROUP_COPY].subtitle}</p>
+              </section>
+              <div className="section-heading"><div><h2>选择一个工具</h2><p>进入后添加文件、设置参数，再点击开始运行。</p></div><span>{TOOLS.filter((tool) => tool.group === view).length} 个可用工具</span></div>
+              <ToolGrid tools={TOOLS.filter((tool) => tool.group === view)} onSelect={selectTool} />
+            </div>
+          ) : null}
+
+          {view === "workspace" ? (
+            <div className="workspace-page">
+              <button className="back-link" onClick={() => setView(activeToolId === "batch-pdf" ? "home" : activeTool.group)}>← 返回工具列表</button>
+              <section className="workspace-title">
+                <span className={`tool-icon large tone-${activeTool.group}`}>{activeTool.icon}</span>
+                <div><p className="eyebrow">{GROUP_COPY[activeTool.group].title}</p><h1>{activeTool.title}</h1><p>{activeTool.description}</p><span className="format-pill">支持：{activeTool.accepts}</span></div>
+              </section>
+              <ol className="flow-steps"><li className="active"><i>1</i>添加文件</li><li className={jobs.length > 0 ? "active" : ""}><i>2</i>确认设置</li><li className={jobs.length > 0 ? "active" : ""}><i>3</i>开始运行</li></ol>
+
+              <div className="workspace-grid">
+                <section className="panel queue-panel">
+                  <div className="panel-heading"><div><h2>待处理文件</h2><p>当前工具可用 {activeInputJobs.length} / {jobs.length} 个 · 点击一项作为当前文件</p></div><div><button className="button ghost small" onClick={chooseFolder}>添加文件夹</button><button className="button primary small" onClick={chooseFiles}>＋ 添加文件</button></div></div>
+                  <button className="drop-zone" onClick={chooseFiles}><span>＋</span><div><b>点击选择，或将文件拖到这里</b><small>{activeTool.accepts}</small></div></button>
+                  <div className="queue-toolbar"><span>{activeTool.multi ? "输出顺序与队列一致" : "请选择一项作为当前处理文件"}</span><div><button onClick={retryFailed} disabled={!jobs.some((job) => job.status === "failed" || job.status === "cancelled")}>重试失败项</button><button onClick={() => moveSelected(-1)} disabled={!selectedJob}>上移</button><button onClick={() => moveSelected(1)} disabled={!selectedJob}>下移</button><button onClick={removeSelected} disabled={!selectedJob}>移除</button></div></div>
+                  <div className="job-list">
+                    {jobs.length === 0 ? <div className="empty-state"><span>□</span><b>还没有文件</b><p>添加符合格式的文件后，“开始运行”按钮会自动可用。</p></div> : jobs.map((job) => (
+                      <article className={`job-row${job.id === selectedId ? " selected" : ""}${toolMatchesPath(activeToolId, job.path) ? "" : " unsupported"}`} key={job.id}>
+                        <button className="job-select" onClick={() => setSelectedId(job.id)} aria-label={`选择 ${job.name}`}><span>{isImage(job.path) ? "IMG" : isPdf(job.path) ? "PDF" : extension(job.path).toUpperCase()}</span></button>
+                        <button className="job-info" onClick={() => setSelectedId(job.id)}><b title={job.name}>{job.name}</b><small>{job.kind} · {job.detail}</small>{job.progress > 0 && job.progress < 100 ? <i><em style={{ width: `${job.progress}%` }} /></i> : null}</button>
+                        <span className={`status status-${job.status}`}>{toolMatchesPath(activeToolId, job.path) ? STATUS_LABEL[job.status] : "格式不符"}</span>
+                        <button className="row-action" onClick={() => { setSelectedId(job.id); setPreviewOpen(true); }}>预览</button>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+
+                <aside className="panel settings-panel">
+                  <div className="panel-heading"><div><h2>转换设置</h2><p>只显示当前工具需要的选项</p></div></div>
+                  {activeToolId === "batch-pdf" ? <>
+                    <label className="field"><span>输出文件夹</span><div className="field-with-button"><input value={outputFolder} readOnly placeholder="请选择保存位置" /><button onClick={selectOutputFolder}>选择</button></div></label>
+                    <label className="field"><span>文件命名规则</span><input value={namingRule} onChange={(event) => setNamingRule(event.currentTarget.value)} placeholder="{name}_{index}" /><small>可用变量：&#123;name&#125;、&#123;index&#125;</small></label>
+                    <label className="field"><span>同名文件处理</span><select value={conflictPolicy} onChange={(event) => setConflictPolicy(event.currentTarget.value as "rename" | "overwrite" | "skip")}><option value="rename">自动重命名</option><option value="overwrite">覆盖原文件</option><option value="skip">跳过该文件</option></select></label>
+                  </> : null}
+                  {activeToolId === "split-pdf" ? <label className="field"><span>每个文件包含页数</span><input type="number" min="1" value={pagesPerFile} onChange={(event) => setPagesPerFile(Math.max(1, Number(event.currentTarget.value) || 1))} /><small>填 1 表示逐页拆分，结果打包为 ZIP。</small></label> : null}
+                  {needsDpi ? <label className="field"><span>导出清晰度（DPI）</span><input type="number" min={activeToolId === "pdf-ppt" ? 96 : 72} max="600" value={imageDpi} onChange={(event) => setImageDpi(Math.min(600, Math.max(activeToolId === "pdf-ppt" ? 96 : 72, Number(event.currentTarget.value) || 150)))} /><small>推荐 150；数值越高，文件越大。</small></label> : null}
+                  {needsOcr ? <label className="field"><span>低置信度阈值 <em className="plain-note">识别把握不足的提醒线</em></span><div className="range-row"><input type="range" min="50" max="99" value={ocrConfidence} onChange={(event) => setOcrConfidence(Number(event.currentTarget.value))} /><b>{ocrConfidence}%</b></div><small>文字识别的把握低于这个数时，结果会标记为“请人工核对”，不会删除文字。推荐保持 80%；图片模糊时可调到 65%–75%。</small></label> : null}
+                  {activeToolId === "organize-pdf" ? <><label className="field"><span>页码范围与顺序</span><input value={pageSpec} onChange={(event) => setPageSpec(event.currentTarget.value)} placeholder="例如：3,1,2,5-8" /><small>省略页码即可删除该页；留空表示全部。</small></label><label className="field"><span>统一旋转</span><select value={rotation} onChange={(event) => setRotation(Number(event.currentTarget.value))}><option value={0}>不旋转</option><option value={90}>顺时针 90°</option><option value={180}>旋转 180°</option><option value={270}>顺时针 270°</option></select></label></> : null}
+                  {activeToolId === "stamp-pdf" ? <><label className="field"><span>水印文字</span><input value={watermark} onChange={(event) => setWatermark(event.currentTarget.value)} placeholder="输入要显示的水印" /></label><label className="check-field"><input type="checkbox" checked={pageNumbers} onChange={(event) => setPageNumbers(event.currentTarget.checked)} /><span><b>添加连续页码</b><small>页码显示在页面底部中央</small></span></label></> : null}
+                  {needsPassword ? <label className="field"><span>{activeToolId === "decrypt-pdf" ? "原 PDF 密码" : "设置 PDF 密码"}</span><input type="password" value={password} onChange={(event) => setPassword(event.currentTarget.value)} placeholder="请输入密码" /></label> : null}
+                  {needsLibreOffice ? <section className={libreOfficePath ? "setting-note success" : "setting-note warning"}><b>{libreOfficePath ? "Office 引擎已就绪" : "Office 文件需要 LibreOffice"}</b><p>{libreOfficePath ? "DOCX、PPTX、XLSX、CSV 和 HTML 可以转换。" : "图片、TXT、Markdown 不受影响；Office 文件转换前请先安装。"}</p>{libreOfficePath === null ? <button onClick={() => openUrl("https://www.libreoffice.org/download/download-libreoffice/")}>安装 LibreOffice →</button> : null}</section> : null}
+                  {!needsDpi && !needsOcr && !needsPassword && activeToolId !== "batch-pdf" && activeToolId !== "split-pdf" && activeToolId !== "organize-pdf" && activeToolId !== "stamp-pdf" && !needsLibreOffice ? <section className="setting-note neutral"><b>无需额外设置</b><p>确认左侧文件和顺序后即可开始运行。</p></section> : null}
+                  <section className="selected-file"><span>当前文件</span><b>{selectedJob?.name ?? "尚未选择"}</b><small>{selectedJob?.path ?? "请在左侧队列中选择一个文件"}</small></section>
+                </aside>
+              </div>
+
+              <footer className="run-dock">
+                <div><b>{canRunActiveTool ? "准备就绪" : activeTool.requirement === "image" ? "请添加至少一张图片" : activeTool.requirement === "any" ? "请添加支持的文件" : "请添加并选中符合要求的文件"}</b><span>{activeTool.title} · 全程本地处理</span></div>
+                <div className="run-actions">
+                  {activeToolId === "batch-pdf" && (batchStatus === "running" || batchStatus === "paused") ? <><button className="button ghost" onClick={togglePause}>{batchStatus === "paused" ? "继续" : "暂停"}</button><button className="button danger" onClick={cancelBatch}>取消</button></> : null}
+                  <button className="button run-button" onClick={runActiveTool} disabled={!canRunActiveTool || running || (needsPassword && !password) || (activeToolId === "stamp-pdf" && !watermark && !pageNumbers)}><span>▶</span>{running ? "正在运行…" : "开始运行"}</button>
+                </div>
+              </footer>
+            </div>
+          ) : null}
+
+          {view === "history" ? (
+            <div className="history-page">
+              <section className="page-intro"><p className="eyebrow">任务管理</p><h1>转换历史</h1><p>仅保存在这台电脑，最多保留 500 条记录。</p></section>
+              <div className="history-actions"><span>共 {history.length} 条</span><div>{outputFolder ? <button className="button ghost" onClick={() => openPath(outputFolder)}>打开输出文件夹</button> : null}<button className="button ghost" disabled={history.length === 0} onClick={() => setHistory([])}>清空历史</button></div></div>
+              <section className="history-list">
+                {history.length === 0 ? <div className="empty-state tall"><span>↻</span><b>暂无转换记录</b><p>完成转换后，结果路径与失败原因会显示在这里。</p></div> : history.map((entry) => <article key={entry.id}><span className={entry.error ? "history-mark error" : "history-mark"}>{entry.error ? "!" : "✓"}</span><div><b>{fileName(entry.source)}</b><small>{new Date(entry.time).toLocaleString()} · {entry.source}</small><p className={entry.error ? "error-text" : "result-text"}>{entry.error ?? entry.output}</p></div>{entry.output ? <button className="button ghost small" onClick={() => openPath(entry.output!)}>打开结果</button> : null}</article>)}
+              </section>
+            </div>
+          ) : null}
+
+          {view === "guide" ? <GuideContent onPickTool={selectTool} /> : null}
+          {view === "settings" ? <SettingsContent outputFolder={outputFolder} libreOfficeOverride={libreOfficeOverride} libreOfficeDetected={libreOfficePath} tempDirectory={tempDirectory} namingRule={namingRule} conflictPolicy={conflictPolicy} ocrConfidence={ocrConfidence} imageDpi={imageDpi} historyCount={history.length} onChooseOutputFolder={selectOutputFolder} onChooseLibreOffice={selectLibreOfficePath} onClearLibreOffice={() => setLibreOfficeOverride("")} onChooseTempDirectory={selectTempDirectory} onClearTempDirectory={() => setTempDirectory("")} onNamingRuleChange={setNamingRule} onConflictPolicyChange={setConflictPolicy} onOcrConfidenceChange={setOcrConfidence} onImageDpiChange={setImageDpi} onShowWelcome={() => { localStorage.removeItem(GUIDE_KEY); setShowWelcome(true); }} onClearHistory={() => setHistory([])} /> : null}
+          {view === "about" ? <AboutContent onOpenWebsite={() => openUrl("https://www.fornowtoday.com")} onContact={() => openUrl(`mailto:${BRAND.email}`)} /> : null}
+        </div>
+      </main>
+
+      {previewOpen ? <div className="drawer-layer" onMouseDown={(event) => { if (event.currentTarget === event.target) setPreviewOpen(false); }}><aside className="preview-drawer" aria-label="文件预览"><header><div><span>结果预览</span><b>{selectedJob?.name ?? "未选择文件"}</b></div><button className="icon-button" onClick={() => setPreviewOpen(false)} aria-label="关闭预览">×</button></header><FilePreview path={selectedJob?.output ?? selectedJob?.path} /><section className="preview-meta"><span>状态</span><b>{selectedJob ? STATUS_LABEL[selectedJob.status] : "无"}</b><p>{selectedJob?.detail}</p><small>{selectedJob?.output ?? selectedJob?.path}</small></section><footer>{selectedJob?.output ? <button className="button primary" onClick={() => openPath(selectedJob.output!)}>打开结果</button> : null}{outputFolder ? <button className="button ghost" onClick={() => openPath(outputFolder)}>打开文件夹</button> : null}</footer></aside></div> : null}
+      {showWelcome ? <WelcomeGuide onClose={() => closeWelcome()} onNeverShow={neverShowWelcome} onGuide={() => closeWelcome("guide")} /> : null}
+    </div>
   );
 }

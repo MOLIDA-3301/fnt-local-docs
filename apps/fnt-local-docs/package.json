@@ -1,7 +1,11 @@
 {
   "name": "fnt-local-docs",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
+  "description": "DocBox 纸间文档盒：FNT 原创的免费 Windows 文档转换、OCR 与 PDF 工具",
+  "homepage": "https://www.fornowtoday.com",
+  "author": "FNT",
+  "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "scripts": {
     "dev": "vite",

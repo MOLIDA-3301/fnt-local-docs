@@ -22,7 +22,21 @@ if (-not (Test-Path -LiteralPath $python)) {
 }
 
 New-Item -ItemType Directory -Path $binaryRoot -Force | Out-Null
-& $python -m PyInstaller --noconfirm --clean --onefile --name fnt-converter --collect-data rapidocr --distpath (Join-Path $buildRoot "dist") --workpath (Join-Path $buildRoot "work") --specpath $buildRoot $pythonScript
+$excludedModules = @(
+    "IPython",
+    "matplotlib",
+    "pandas",
+    "pytest",
+    "setuptools",
+    "tkinter",
+    "torch",
+    "tensorflow",
+    "paddle",
+    "paddleocr"
+)
+$excludeArgs = $excludedModules | ForEach-Object { "--exclude-module=$_" }
+
+& $python -m PyInstaller --noconfirm --clean --onefile --optimize 2 --name fnt-converter --collect-data rapidocr $excludeArgs --distpath (Join-Path $buildRoot "dist") --workpath (Join-Path $buildRoot "work") --specpath $buildRoot $pythonScript
 
 $sourceBinary = Join-Path $buildRoot "dist\fnt-converter.exe"
 $targetBinary = Join-Path $binaryRoot "fnt-converter-$targetTriple.exe"

@@ -12,6 +12,54 @@ struct LocalFile {
     size: u64,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BuildIdentity {
+    product: &'static str,
+    owner: &'static str,
+    website: &'static str,
+    contact: &'static str,
+    version: &'static str,
+    build_id: &'static str,
+    license: &'static str,
+}
+
+#[tauri::command]
+fn build_identity() -> BuildIdentity {
+    BuildIdentity {
+        product: "DocBox 纸间文档盒",
+        owner: "FNT",
+        website: "https://www.fornowtoday.com",
+        contact: "ouo@fornowtoday.com",
+        version: env!("CARGO_PKG_VERSION"),
+        build_id: "DOCBOX-CN-2026-03",
+        license: "FNT 免费非商业许可 1.0",
+    }
+}
+
+#[tauri::command]
+fn configure_resource_paths(libreoffice_path: Option<String>, temp_directory: Option<String>) -> Result<(), String> {
+    match libreoffice_path.filter(|value| !value.trim().is_empty()) {
+        Some(value) => {
+            let path = PathBuf::from(&value);
+            if !path.is_file() || !path.file_name().and_then(|name| name.to_str()).map(|name| name.eq_ignore_ascii_case("soffice.exe")).unwrap_or(false) {
+                return Err("请选择 LibreOffice program 文件夹中的 soffice.exe".into());
+            }
+            std::env::set_var("FNT_LIBREOFFICE_PATH", path);
+        }
+        None => std::env::remove_var("FNT_LIBREOFFICE_PATH"),
+    }
+    match temp_directory.filter(|value| !value.trim().is_empty()) {
+        Some(value) => {
+            let path = PathBuf::from(&value);
+            if !path.is_dir() { return Err("选择的临时文件夹不存在".into()); }
+            std::env::set_var("FNT_TEMP_PATH", path);
+        }
+        None => std::env::remove_var("FNT_TEMP_PATH"),
+    }
+    Ok(())
+}
+
 fn collect_supported_files(directory: &Path, files: &mut Vec<LocalFile>) -> Result<(), String> {
     for entry in fs::read_dir(directory).map_err(|error| format!("无法读取文件夹：{error}"))? {
         let entry = entry.map_err(|error| error.to_string())?;
@@ -239,7 +287,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![list_supported_files, expand_dropped_paths, validate_batch_inputs, resolve_output_path, read_preview_text, merge_images_to_pdf, images_to_scan_pdf, merge_pdfs, split_pdf, encrypt_pdf, decrypt_pdf, organize_pdf, compress_pdf, stamp_pdf, pdf_to_text, files_to_pdf, conversion_engine_status, pdf_to_images, pdf_to_word, ocr_document, pdf_to_excel, pdf_to_ppt])
+        .invoke_handler(tauri::generate_handler![build_identity, configure_resource_paths, list_supported_files, expand_dropped_paths, validate_batch_inputs, resolve_output_path, read_preview_text, merge_images_to_pdf, images_to_scan_pdf, merge_pdfs, split_pdf, encrypt_pdf, decrypt_pdf, organize_pdf, compress_pdf, stamp_pdf, pdf_to_text, files_to_pdf, conversion_engine_status, pdf_to_images, pdf_to_word, ocr_document, pdf_to_excel, pdf_to_ppt])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
