@@ -6,7 +6,7 @@ export const BRAND = {
   owner: "FNT",
   website: "www.fornowtoday.com",
   email: "ouo@fornowtoday.com",
-  version: "0.4.0",
+  version: "0.6.0",
   copyright: "© 2026 FNT. 保留所有权利。",
-  buildId: "DOCBOX-CN-2026-04",
+  buildId: "DOCBOX-CN-2026-06",
 } as const;

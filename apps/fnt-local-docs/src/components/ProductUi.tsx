@@ -1,5 +1,15 @@
 import type { ToolDefinition, ToolId } from "../product";
+import { GROUP_COPY, TOOLS } from "../product";
 import { BRAND } from "../brand";
+
+const GROUP_ICONS = {
+  convert: "/category-icons/convert-to-pdf.png",
+  export: "/category-icons/export-from-pdf.png",
+  ocr: "/category-icons/ocr.png",
+  pdf: "/category-icons/pdf-tools.png",
+} as const;
+
+const LIBRE_OFFICE_TOOLS = new Set<ToolId>(["word-pdf", "ppt-pdf", "sheet-pdf", "html-pdf"]);
 
 export function FntMark({ compact = false }: { compact?: boolean }) {
   return (
@@ -28,6 +38,55 @@ export function ToolGrid({ tools, onSelect }: { tools: ToolDefinition[]; onSelec
   );
 }
 
+export function HomeToolBoard({ libreOfficeReady, onSelect, onDownload }: { libreOfficeReady: boolean; onSelect: (id: ToolId) => void; onDownload: () => void }) {
+  const groups = Object.keys(GROUP_COPY) as Array<keyof typeof GROUP_COPY>;
+  const availableCount = TOOLS.filter((tool) => libreOfficeReady || !LIBRE_OFFICE_TOOLS.has(tool.id)).length;
+
+  return (
+    <section className="home-tool-board">
+      <header className="board-heading">
+        <div><p className="eyebrow">全部功能</p><h2>选择一个工具，直接开始</h2><p>大部分功能安装后即可使用，置灰项目需要补充办公转换引擎。</p></div>
+        <div className={libreOfficeReady ? "engine-summary ready" : "engine-summary warning"}><span>{libreOfficeReady ? "✓" : "!"}</span><div><b>{libreOfficeReady ? "全部工具已就绪" : "4 个功能需要先安装"}</b><small>{libreOfficeReady ? "LibreOffice 已连接" : `${availableCount} 个功能现在可以直接用`}</small></div>{!libreOfficeReady ? <button onClick={onDownload}>下载 LibreOffice</button> : null}</div>
+      </header>
+      <div className="function-groups">
+        {groups.map((group) => {
+          const tools = TOOLS.filter((tool) => tool.group === group);
+          const available = tools.filter((tool) => libreOfficeReady || !LIBRE_OFFICE_TOOLS.has(tool.id)).length;
+          return (
+            <article className={`function-group group-${group}`} key={group}>
+              <header><img src={GROUP_ICONS[group]} alt="" /><div><span>{available} / {tools.length} 可用</span><h3>{GROUP_COPY[group].title}</h3><p>{GROUP_COPY[group].subtitle}</p></div></header>
+              <div className="function-list">
+                {tools.map((tool) => {
+                  const locked = LIBRE_OFFICE_TOOLS.has(tool.id) && !libreOfficeReady;
+                  return <button key={tool.id} className={locked ? "function-item locked" : "function-item"} disabled={locked} onClick={() => onSelect(tool.id)}><span className={`mini-tool-icon tone-${group}`}>{tool.icon}</span><span><b>{tool.title}</b><small>{locked ? "需要 LibreOffice" : "可以直接使用"}</small></span><i>{locked ? "锁" : "→"}</i></button>;
+                })}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+export function QuickStartPicker({ libreOfficeReady, onClose, onSelect, onDownload }: { libreOfficeReady: boolean; onClose: () => void; onSelect: (id: ToolId) => void; onDownload: () => void }) {
+  const groups = Object.keys(GROUP_COPY) as Array<keyof typeof GROUP_COPY>;
+  return (
+    <div className="modal-layer" role="dialog" aria-modal="true" aria-labelledby="quick-picker-title" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
+      <section className="quick-picker-card">
+        <header><div><p className="eyebrow">快速开始</p><h1 id="quick-picker-title">你想处理什么？</h1><p>选择功能后，再添加文件。</p></div><button className="icon-button" onClick={onClose} aria-label="关闭功能选择">×</button></header>
+        {!libreOfficeReady ? <aside className="quick-engine-note"><span>!</span><div><b>4 个 Office 转 PDF 功能暂不可用</b><small>安装免费的 LibreOffice 后即可解锁。</small></div><button onClick={onDownload}>下载 LibreOffice</button></aside> : null}
+        <div className="quick-picker-groups">
+          {groups.map((group) => <section key={group}><h2><span className={`mini-tool-icon tone-${group}`}>{group === "convert" ? "PDF" : group === "export" ? "↗" : group === "ocr" ? "字" : "◇"}</span>{GROUP_COPY[group].title}</h2><div>{TOOLS.filter((tool) => tool.group === group).map((tool) => {
+            const locked = LIBRE_OFFICE_TOOLS.has(tool.id) && !libreOfficeReady;
+            return <button key={tool.id} className={locked ? "quick-tool locked" : "quick-tool"} disabled={locked} onClick={() => onSelect(tool.id)}><span>{tool.icon}</span><b>{tool.title}</b><small>{locked ? "缺少 LibreOffice" : "选择"}</small><i>{locked ? "锁" : "→"}</i></button>;
+          })}</div></section>)}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function WelcomeGuide({ onClose, onNeverShow, onGuide }: { onClose: () => void; onNeverShow: () => void; onGuide: () => void }) {
   return (
     <div className="modal-layer" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
@@ -36,11 +95,11 @@ export function WelcomeGuide({ onClose, onNeverShow, onGuide }: { onClose: () =>
         <button className="icon-button modal-close" onClick={onClose} aria-label="关闭新手引导">×</button>
         <p className="eyebrow">欢迎使用</p>
         <h1 id="welcome-title">三步完成本地转换</h1>
-        <p className="welcome-lead">选择工具、添加文件、点击开始运行，三步即可完成。</p>
+        <p className="welcome-lead">选择工具、添加文件、选择保存位置，按页面提示即可完成。</p>
         <div className="welcome-steps">
           <article><i>1</i><b>选择工具</b><span>首页按任务分类展示全部功能</span></article>
           <article><i>2</i><b>添加文件</b><span>支持多选、文件夹与直接拖入</span></article>
-          <article><i>3</i><b>开始运行</b><span>完成后预览、打开或查看历史</span></article>
+          <article><i>3</i><b>保存并处理</b><span>选择保存位置后开始，完成后可预览</span></article>
         </div>
         <div className="welcome-actions">
           <button className="button text-button" onClick={onNeverShow}>不再自动显示</button>
@@ -59,7 +118,7 @@ export function GuideContent({ onPickTool }: { onPickTool: (id: ToolId) => void 
       <section className="guide-hero">
         <p className="eyebrow">使用教程</p>
         <h1>第一次使用，从这里开始</h1>
-        <p>先选目标工具，再添加文件，最后点击“开始运行”。页面会显示每个文件的进度、结果和失败原因。</p>
+        <p>先选目标工具，再添加文件，最后点击“选择保存位置并开始”。页面会显示每个文件的进度、结果和失败原因。</p>
       </section>
       <section className="dependency-guide">
         <div className="dependency-title"><span>运行要求</span><h2>哪些开箱即用，哪些需要安装？</h2><p>安装 DocBox 后，大多数功能无需再下载任何东西。</p></div>
@@ -70,15 +129,15 @@ export function GuideContent({ onPickTool }: { onPickTool: (id: ToolId) => void 
       <section className="guide-steps-large">
         <article><span>01</span><div><h3>选择你要完成的任务</h3><p>不要先纠结文件类型：首页分为“转成 PDF、从 PDF 导出、OCR、PDF 工具”四组，直接点击目标工具。</p></div></article>
         <article><span>02</span><div><h3>添加并检查文件</h3><p>可选择文件、整个文件夹或拖入窗口。合并图片和 PDF 时，用上移、下移确定最终页序。</p></div></article>
-        <article><span>03</span><div><h3>设置参数并开始运行</h3><p>参数只在需要时显示。点击页面底部黑色“开始运行”，每个文件会显示状态、结果或失败原因。</p></div></article>
+        <article><span>03</span><div><h3>选择保存位置并处理</h3><p>参数只在需要时显示。点击页面底部主按钮，在“另存为”窗口确认位置后开始；每个文件都会显示状态、结果或失败原因。</p></div></article>
         <article><span>04</span><div><h3>查看和管理结果</h3><p>点击“预览”打开结果抽屉，也可直接打开文件或输出文件夹。所有记录只保存在本机历史中。</p></div></article>
       </section>
       <h2>常见任务快速开始</h2>
       <div className="quick-guides">
-        <button onClick={() => onPickTool("mixed-pdf")}><b>Office / 图片转 PDF</b><span>选工具 → 添加文件 → 开始运行</span></button>
-        <button onClick={() => onPickTool("pdf-word")}><b>PDF 转 Word</b><span>添加 PDF → 选中文件 → 开始运行</span></button>
-        <button onClick={() => onPickTool("ocr-searchable")}><b>扫描件变得可搜索</b><span>添加扫描 PDF 或图片 → 设置置信度 → 开始运行</span></button>
-        <button onClick={() => onPickTool("organize-pdf")}><b>整理 PDF 页面</b><span>输入页码顺序和旋转角度 → 开始运行</span></button>
+        <button onClick={() => onPickTool("mixed-pdf")}><b>Office / 图片转 PDF</b><span>选工具 → 添加文件 → 选择保存位置</span></button>
+        <button onClick={() => onPickTool("pdf-word")}><b>PDF 转 Word</b><span>添加 PDF → 选中文件 → 选择保存位置</span></button>
+        <button onClick={() => onPickTool("ocr-searchable")}><b>扫描件变得可搜索</b><span>添加扫描 PDF 或图片 → 设置置信度 → 保存并处理</span></button>
+        <button onClick={() => onPickTool("organize-pdf")}><b>整理 PDF 页面</b><span>输入页码顺序和旋转角度 → 保存并处理</span></button>
       </div>
       <h2 className="guide-detail-title">分类使用说明</h2>
       <section className="guide-details">
@@ -87,7 +146,7 @@ export function GuideContent({ onPickTool }: { onPickTool: (id: ToolId) => void 
         <details><summary>OCR：图片和扫描 PDF 变成可编辑内容</summary><div><p>选择 TXT、Markdown 或 Word 可得到可编辑文字；选择“可搜索 PDF”会保留原页面并加入隐藏文字层。置信度阈值越高，被标记为需要人工检查的内容越多。</p><p>OCR 不限制页数，但长文档会逐页处理，需要更多时间和临时磁盘空间。</p></div></details>
         <details><summary>PDF 整理与安全</summary><div><p>“整理 PDF 页面”用逗号和范围表示输出页序，例如 <code>3,1,2,5-8</code>；不写入的页面相当于删除。拆分可设置每个文件包含 N 页，结果自动打包 ZIP。</p><p>加密使用 AES-256；解密必须填写原密码。水印支持文字、Logo、印章或自定义图片图案，并可同时添加页码。压缩以安全结构优化为主，不承诺明显降低以图片为主的 PDF。</p></div></details>
         <details><summary>批量队列、结果预览与历史</summary><div><p>批量模式可设置输出目录、命名规则和同名冲突方式。暂停或取消会在当前单文件完成后生效，单个文件失败不会中止后续任务。</p><p>完成后点击队列中的“预览”；窄窗口下预览会变为底部面板。转换历史只保存在本机，最多 500 条，可查看结果路径与失败原因。</p></div></details>
-        <details><summary>常见问题排查</summary><div><p><b>Office 转换不可用：</b>安装 LibreOffice 后重新启动软件，左下角应显示“已就绪”。</p><p><b>开始运行是灰色：</b>检查当前工具支持的格式，并在队列中选中一个符合要求的文件；加密、解密还需要填写密码。</p><p><b>扫描 PDF 没有文字：</b>普通“PDF 转 TXT”只提取电子文字，请改用 OCR 分类中的工具。</p></div></details>
+        <details><summary>常见问题排查</summary><div><p><b>Office 转换不可用：</b>安装 LibreOffice 后重新启动软件；相关功能卡片会自动恢复可用。</p><p><b>保存并开始按钮是灰色：</b>查看按钮左侧的“下一步”提示；通常需要先添加并选中符合格式的文件，加密、解密还需要填写密码。</p><p><b>扫描 PDF 没有文字：</b>普通“PDF 转 TXT”只提取电子文字，请改用 OCR 分类中的工具。</p></div></details>
       </section>
       <section className="guide-note">
         <b>资源保护</b>

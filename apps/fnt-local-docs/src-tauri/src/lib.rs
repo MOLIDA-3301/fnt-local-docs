@@ -229,10 +229,11 @@ async fn compress_pdf(app: tauri::AppHandle, source: String, destination: String
 }
 
 #[tauri::command]
-async fn stamp_pdf(app: tauri::AppHandle, source: String, destination: String, watermark: Option<String>, watermark_image: Option<String>, page_numbers: bool, password: Option<String>) -> Result<String, String> {
+async fn stamp_pdf(app: tauri::AppHandle, source: String, destination: String, watermark: Option<String>, watermark_image: Option<String>, watermark_position: String, watermark_count: u32, watermark_size: f64, watermark_opacity: f64, watermark_angle: f64, page_numbers: bool, password: Option<String>) -> Result<String, String> {
     let mut args = vec!["stamp-pdf".into(), "--source".into(), source, "--destination".into(), destination.clone()];
     if let Some(watermark) = watermark { if !watermark.trim().is_empty() { args.push("--watermark".into()); args.push(watermark); } }
     if let Some(image) = watermark_image { if !image.trim().is_empty() { args.push("--watermark-image".into()); args.push(image); } }
+    args.extend(["--watermark-position".into(), watermark_position, "--watermark-count".into(), watermark_count.to_string(), "--watermark-size".into(), watermark_size.to_string(), "--watermark-opacity".into(), watermark_opacity.to_string(), "--watermark-angle".into(), watermark_angle.to_string()]);
     if page_numbers { args.push("--page-numbers".into()); }
     if let Some(password) = password { args.push("--password".into()); args.push(password); }
     run_converter(&app, args, destination).await

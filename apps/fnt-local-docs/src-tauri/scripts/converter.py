@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import os
 import re
 import shutil
@@ -340,7 +341,26 @@ def compress_pdf(source: Path, destination: Path, password: str | None) -> None:
         document.close()
 
 
-def stamp_pdf(source: Path, destination: Path, watermark: str | None, watermark_image: str | None, page_numbers: bool, password: str | None) -> None:
+def _watermark_points(width: float, height: float, position: str, count: int) -> list[tuple[float, float]]:
+    count = max(1, min(36, count))
+    if count > 1:
+        columns = max(1, math.ceil(math.sqrt(count * width / max(height, 1))))
+        rows = math.ceil(count / columns)
+        return [
+            (width * (column + 0.5) / columns, height * (row + 0.5) / rows)
+            for row in range(rows)
+            for column in range(columns)
+        ][:count]
+    anchors = {
+        "top-left": (0.18, 0.84), "top-center": (0.50, 0.84), "top-right": (0.82, 0.84),
+        "center-left": (0.18, 0.50), "center": (0.50, 0.50), "center-right": (0.82, 0.50),
+        "bottom-left": (0.18, 0.16), "bottom-center": (0.50, 0.16), "bottom-right": (0.82, 0.16),
+    }
+    x_ratio, y_ratio = anchors.get(position, anchors["center"])
+    return [(width * x_ratio, height * y_ratio)]
+
+
+def stamp_pdf(source: Path, destination: Path, watermark: str | None, watermark_image: str | None, watermark_position: str, watermark_count: int, watermark_size: float, watermark_opacity: float, watermark_angle: float, page_numbers: bool, password: str | None) -> None:
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.cidfonts import UnicodeCIDFont
     from reportlab.lib.utils import ImageReader
@@ -370,14 +390,18 @@ def stamp_pdf(source: Path, destination: Path, watermark: str | None, watermark_
         canvas = Canvas(overlay_buffer, pagesize=(width, height))
         canvas.setFont("STSong-Light", 12)
         if watermark:
-            canvas.saveState()
-            canvas.setFillAlpha(0.18)
-            canvas.setFillColorRGB(0.35, 0.35, 0.35)
-            canvas.translate(width / 2, height / 2)
-            canvas.rotate(35)
-            canvas.setFont("STSong-Light", max(24, min(54, width / 10)))
-            canvas.drawCentredString(0, 0, watermark)
-            canvas.restoreState()
+            font_size = max(14.0, min(96.0, watermark_size))
+            opacity = max(0.05, min(0.70, watermark_opacity))
+            angle = max(-90.0, min(90.0, watermark_angle))
+            for mark_x, mark_y in _watermark_points(width, height, watermark_position, watermark_count):
+                canvas.saveState()
+                canvas.setFillAlpha(opacity)
+                canvas.setFillColorRGB(0.25, 0.28, 0.30)
+                canvas.translate(mark_x, mark_y)
+                canvas.rotate(angle)
+                canvas.setFont("STSong-Light", font_size)
+                canvas.drawCentredString(0, -font_size * 0.32, watermark)
+                canvas.restoreState()
         if image_reader:
             mark_width = min(width * 0.2, 130)
             mark_height = mark_width * image_ratio
@@ -762,6 +786,11 @@ def build_parser() -> argparse.ArgumentParser:
     stamp.add_argument("--destination", required=True)
     stamp.add_argument("--watermark")
     stamp.add_argument("--watermark-image")
+    stamp.add_argument("--watermark-position", choices=["top-left", "top-center", "top-right", "center-left", "center", "center-right", "bottom-left", "bottom-center", "bottom-right"], default="center")
+    stamp.add_argument("--watermark-count", type=int, default=12)
+    stamp.add_argument("--watermark-size", type=float, default=34)
+    stamp.add_argument("--watermark-opacity", type=float, default=0.18)
+    stamp.add_argument("--watermark-angle", type=float, default=-35)
     stamp.add_argument("--page-numbers", action="store_true")
     stamp.add_argument("--password")
     text = subparsers.add_parser("pdf-to-text")
@@ -822,7 +851,7 @@ def main() -> None:
     elif args.command == "compress-pdf":
         compress_pdf(Path(args.source), Path(args.destination), args.password)
     elif args.command == "stamp-pdf":
-        stamp_pdf(Path(args.source), Path(args.destination), args.watermark, args.watermark_image, args.page_numbers, args.password)
+        stamp_pdf(Path(args.source), Path(args.destination), args.watermark, args.watermark_image, args.watermark_position, args.watermark_count, args.watermark_size, args.watermark_opacity, args.watermark_angle, args.page_numbers, args.password)
     elif args.command == "pdf-to-text":
         pdf_to_text(Path(args.source), Path(args.destination), args.format, args.password)
     elif args.command == "files-to-pdf":

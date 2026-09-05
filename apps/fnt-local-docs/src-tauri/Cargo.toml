@@ -1,6 +1,6 @@
 [package]
 name = "fnt-local-docs"
-version = "0.4.0"
+version = "0.6.0"
 description = "DocBox 纸间文档盒：文档转换、OCR 与 PDF 桌面工具"
 homepage = "https://www.fornowtoday.com"
 authors = ["FNT"]
