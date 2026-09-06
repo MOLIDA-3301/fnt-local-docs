@@ -1178,8 +1178,8 @@ body { background: #f7f7f6; }
   width: clamp(220px, 21vw, 340px);
   aspect-ratio: 1;
   background: linear-gradient(145deg, #d8eef5 8%, #e9e2f5 92%);
-  -webkit-mask: url("/docbox-mark.png") center / contain no-repeat;
-  mask: url("/docbox-mark.png") center / contain no-repeat;
+  -webkit-mask: url("/docbox-mark-mask.png") center / contain no-repeat;
+  mask: url("/docbox-mark-mask.png") center / contain no-repeat;
   opacity: .18;
   pointer-events: none;
   z-index: 2;
@@ -1477,7 +1477,7 @@ textarea:focus { border-color: #70bfdc; outline: 3px solid #7acde826; }
 .about-page .legal-card.quiet {
   background: linear-gradient(135deg, #10191fe8, #1d2930e8);
 }
-.about-page .about-hero .brand-glyph { filter: invert(1) brightness(2); }
+.about-page .about-hero .brand-glyph { filter: none; }
 .about-page .about-hero .fnt-mark b,
 .about-page .about-hero h1,
 .about-page .legal-card h2,
