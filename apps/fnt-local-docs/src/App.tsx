@@ -813,10 +813,18 @@ export default function App() {
           ? "点击主按钮后选择输出文件夹，随后开始逐个处理。"
           : "点击主按钮会打开“另存为”窗口；确认文件名和位置后立即开始处理。";
 
+  const currentPageLabel = view === "workspace" ? activeTool.title : view === "home" ? "首页" : view === "batch" ? "全部任务" : view === "history" ? "转换历史" : view === "settings" ? "设置" : view === "guide" ? "使用教程" : view === "about" ? "关于与声明" : GROUP_COPY[view as keyof typeof GROUP_COPY]?.title;
+  const currentPageIcon = view === "workspace" ? activeTool.icon : view === "home" ? "⌂" : view === "batch" ? "≡" : view === "history" ? "↻" : view === "settings" ? "⚙" : view === "guide" ? "?" : view === "about" ? "i" : view === "convert" ? "PDF" : view === "export" ? "↗" : view === "ocr" ? "字" : "◇";
+
   return (
     <div className={sidebarCollapsed ? "app-shell sidebar-collapsed" : "app-shell"}>
       <aside className={sidebarCollapsed ? "sidebar collapsed" : "sidebar"}>
-        <div className="sidebar-control"><button onClick={toggleSidebar} title={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}><span>{sidebarCollapsed ? "›" : "‹"}</span><b>{sidebarCollapsed ? "展开" : "收起侧栏"}</b></button></div>
+        <header className="sidebar-brandbar">
+          <button className="sidebar-brand-home" onClick={() => setView("home")} title="返回 DocBox 首页" aria-label="返回 DocBox 首页">
+            <span><b>DocBox</b></span>
+          </button>
+          <button className="sidebar-toggle" onClick={toggleSidebar} title={sidebarCollapsed ? "展开侧栏" : "收起侧栏"} aria-label={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}><span>{sidebarCollapsed ? "›" : "‹"}</span></button>
+        </header>
         <nav className="main-nav" aria-label="主要功能">
           <button title="首页" className={view === "home" ? "active" : ""} onClick={() => setView("home")}><span>⌂</span><b>首页</b></button>
           <section className="task-nav-group">
@@ -847,7 +855,10 @@ export default function App() {
 
       <main className="main-content">
         <header className={`topbar topbar-${view}`}>
-          <div className="topbar-path"><button onClick={() => setView("home")} aria-label="返回 DocBox 首页"><img src="/docbox-mark.png" alt="" /><span>DocBox</span></button><i>›</i><b>{view === "workspace" ? activeTool.title : view === "home" ? "首页" : view === "batch" ? "全部任务" : view === "history" ? "转换历史" : view === "settings" ? "设置" : view === "guide" ? "使用教程" : view === "about" ? "关于与声明" : GROUP_COPY[view as keyof typeof GROUP_COPY]?.title}</b></div>
+          <div className="topbar-path" aria-label={`当前位置：${currentPageLabel}`}>
+            <span className="topbar-page-icon" aria-hidden="true">{currentPageIcon}</span>
+            <span className="topbar-page-copy"><small>当前位置</small><b>{currentPageLabel}</b></span>
+          </div>
           <div className="topbar-actions">
             <button className="topbar-help" onClick={() => setView("guide")}><span>?</span>帮助</button>
           </div>

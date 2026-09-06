@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none">
+  <g stroke="#111214" stroke-width="58" stroke-linecap="round" stroke-linejoin="round">
+    <!-- One continuous four-pane box top, matching the approved DocBox mark. -->
+    <path d="M512 126 850 322 512 520 174 322Z"/>
+    <path d="M343 224 512 322 681 224M343 421 512 322 681 421"/>
+
+    <!-- Symmetric closed box body. -->
+    <path d="M174 322v326c0 31 16 60 43 76l295 174 295-174c27-16 43-45 43-76V322"/>
+    <path d="M512 520v378"/>
+  </g>
+</svg>

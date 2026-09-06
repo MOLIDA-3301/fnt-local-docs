@@ -114,44 +114,27 @@ export function WelcomeGuide({ onClose, onNeverShow, onGuide }: { onClose: () =>
 
 export function GuideContent({ onPickTool }: { onPickTool: (id: ToolId) => void }) {
   return (
-    <div className="guide-page">
-      <section className="guide-hero">
-        <p className="eyebrow">使用教程</p>
-        <h1>第一次使用，从这里开始</h1>
-        <p>先选目标工具，再添加文件，最后点击“选择保存位置并开始”。页面会显示每个文件的进度、结果和失败原因。</p>
+    <div className="guide-page guide-simple">
+      <section className="guide-hero-simple">
+        <div><p className="eyebrow">DOCBOX 使用教程</p><h1>三步完成处理</h1><p>页面会告诉你下一步。一般只需选择工具、添加文件、确认保存位置。</p></div>
+        <ol><li><i>1</i><b>选工具</b><span>确定想得到什么结果</span></li><li><i>2</i><b>加文件</b><span>拖入或选择文件</span></li><li><i>3</i><b>保存并开始</b><span>确认位置，查看进度</span></li></ol>
       </section>
-      <section className="dependency-guide">
-        <div className="dependency-title"><span>运行要求</span><h2>哪些开箱即用，哪些需要安装？</h2><p>安装 DocBox 后，大多数功能无需再下载任何东西。</p></div>
-        <article className="dependency-ready"><i>✓</i><div><b>无需额外下载</b><p>OCR 文字识别、PDF 转 Word / Excel / PPT / TXT / Markdown / 图片、图片与文本转 PDF，以及 PDF 合并、拆分、整理、压缩、水印、加密和解密。</p><small>OCR、PDF 引擎和中英文识别模型已经包含在安装包内；不需要另装 Python、Tesseract、FFmpeg 或 AVS3。</small></div></article>
-        <article className="dependency-extra"><i>＋</i><div><b>只有这些需要 LibreOffice</b><p>Word / DOCX、PowerPoint / PPTX、Excel / XLSX / CSV、HTML → PDF。</p><small>原因：DocBox 调用 LibreOffice 的办公文档排版引擎，避免自己重复打包一整套 Office 内核。未安装时，上述功能会明确提示，其他工具不受影响。</small></div></article>
-        <aside className="system-requirement"><b>系统界面组件</b><p>DocBox 使用 Microsoft WebView2 显示界面。Windows 10 / 11 通常已经自带；只有系统缺失时，安装程序才会联网补装一次。它不是 OCR 模型，也不会上传你的文件。</p></aside>
+      <section className="guide-engine-simple">
+        <article className="ready"><i>✓</i><div><b>安装后直接使用</b><p>OCR、PDF 导出、图片与文本转 PDF，以及全部 PDF 整理工具。</p><small>PDF 与中英文 OCR 引擎已经内置。</small></div></article>
+        <article className="extra"><i>＋</i><div><b>4 项功能需要 LibreOffice</b><p>Word、PowerPoint、Excel / CSV、HTML 转 PDF。</p><small>其他功能不受影响。</small></div></article>
       </section>
-      <section className="guide-steps-large">
-        <article><span>01</span><div><h3>选择你要完成的任务</h3><p>不要先纠结文件类型：首页分为“转成 PDF、从 PDF 导出、OCR、PDF 工具”四组，直接点击目标工具。</p></div></article>
-        <article><span>02</span><div><h3>添加并检查文件</h3><p>可选择文件、整个文件夹或拖入窗口。合并图片和 PDF 时，用上移、下移确定最终页序。</p></div></article>
-        <article><span>03</span><div><h3>选择保存位置并处理</h3><p>参数只在需要时显示。点击页面底部主按钮，在“另存为”窗口确认位置后开始；每个文件都会显示状态、结果或失败原因。</p></div></article>
-        <article><span>04</span><div><h3>查看和管理结果</h3><p>点击“预览”打开结果抽屉，也可直接打开文件或输出文件夹。所有记录只保存在本机历史中。</p></div></article>
-      </section>
-      <h2>常见任务快速开始</h2>
-      <div className="quick-guides">
-        <button onClick={() => onPickTool("mixed-pdf")}><b>Office / 图片转 PDF</b><span>选工具 → 添加文件 → 选择保存位置</span></button>
-        <button onClick={() => onPickTool("pdf-word")}><b>PDF 转 Word</b><span>添加 PDF → 选中文件 → 选择保存位置</span></button>
-        <button onClick={() => onPickTool("ocr-searchable")}><b>扫描件变得可搜索</b><span>添加扫描 PDF 或图片 → 设置置信度 → 保存并处理</span></button>
-        <button onClick={() => onPickTool("organize-pdf")}><b>整理 PDF 页面</b><span>输入页码顺序和旋转角度 → 保存并处理</span></button>
+      <section className="guide-section-heading"><div><p className="eyebrow">常用入口</p><h2>点一下，直接开始</h2></div><span>进入工具后，按页面底部提示操作</span></section>
+      <div className="guide-shortcuts">
+        <button onClick={() => onPickTool("mixed-pdf")}><i>PDF</i><span><b>转成 PDF</b><small>Office、文本、图片合并</small></span><em>→</em></button>
+        <button onClick={() => onPickTool("pdf-word")}><i>W</i><span><b>PDF 转 Word</b><small>电子文档或扫描件</small></span><em>→</em></button>
+        <button onClick={() => onPickTool("ocr-searchable")}><i>字</i><span><b>扫描件识别</b><small>生成可搜索 PDF</small></span><em>→</em></button>
+        <button onClick={() => onPickTool("organize-pdf")}><i>页</i><span><b>整理 PDF</b><small>排序、旋转、删除页面</small></span><em>→</em></button>
       </div>
-      <h2 className="guide-detail-title">分类使用说明</h2>
-      <section className="guide-details">
-        <details open><summary>转成 PDF：Office、文本、HTML 与图片</summary><div><p>Word、PowerPoint、Excel、CSV 和 HTML 依赖本机 LibreOffice；TXT、Markdown 和图片使用内置引擎。需要把多种格式合成一个 PDF 时选择“文件转 PDF”，页序严格跟随队列。</p><p>图片合并前先在队列中选择文件，再用“上移 / 下移”调整顺序。单独转换多个文件并分别保存时使用“批量转 PDF”。</p></div></details>
-        <details><summary>从 PDF 导出：Word、Excel、PPT、图片与文本</summary><div><p>PDF 转 Word 会优先尝试恢复段落、表格、图片和布局；扫描件自动回退 OCR。PDF 转 Excel 会生成识别表格及 Raw 原始数据，请检查低置信度标记。</p><p>PDF 转 PPT 以一页 PDF 对应一页幻灯片，保证视觉一致，但页面元素不能单独编辑。导出图片可调整 DPI，150 适合屏幕查看，300 适合打印。</p></div></details>
-        <details><summary>OCR：图片和扫描 PDF 变成可编辑内容</summary><div><p>选择 TXT、Markdown 或 Word 可得到可编辑文字；选择“可搜索 PDF”会保留原页面并加入隐藏文字层。置信度阈值越高，被标记为需要人工检查的内容越多。</p><p>OCR 不限制页数，但长文档会逐页处理，需要更多时间和临时磁盘空间。</p></div></details>
-        <details><summary>PDF 整理与安全</summary><div><p>“整理 PDF 页面”用逗号和范围表示输出页序，例如 <code>3,1,2,5-8</code>；不写入的页面相当于删除。拆分可设置每个文件包含 N 页，结果自动打包 ZIP。</p><p>加密使用 AES-256；解密必须填写原密码。水印支持文字、Logo、印章或自定义图片图案，并可同时添加页码。压缩以安全结构优化为主，不承诺明显降低以图片为主的 PDF。</p></div></details>
-        <details><summary>批量队列、结果预览与历史</summary><div><p>批量模式可设置输出目录、命名规则和同名冲突方式。暂停或取消会在当前单文件完成后生效，单个文件失败不会中止后续任务。</p><p>完成后点击队列中的“预览”；窄窗口下预览会变为底部面板。转换历史只保存在本机，最多 500 条，可查看结果路径与失败原因。</p></div></details>
-        <details><summary>常见问题排查</summary><div><p><b>Office 转换不可用：</b>安装 LibreOffice 后重新启动软件；相关功能卡片会自动恢复可用。</p><p><b>保存并开始按钮是灰色：</b>查看按钮左侧的“下一步”提示；通常需要先添加并选中符合格式的文件，加密、解密还需要填写密码。</p><p><b>扫描 PDF 没有文字：</b>普通“PDF 转 TXT”只提取电子文字，请改用 OCR 分类中的工具。</p></div></details>
+      <section className="guide-help-simple">
+        <p className="eyebrow">遇到问题</p><h2>先检查这三项</h2>
+        <div><article><i>01</i><b>按钮还是灰色</b><p>添加符合当前工具格式的文件，再按底部提示补全密码或水印。</p></article><article><i>02</i><b>Office 转 PDF 不可用</b><p>安装 LibreOffice 后重启 DocBox。只有这 4 项依赖它。</p></article><article><i>03</i><b>扫描 PDF 没有文字</b><p>普通导出只读电子文字，请改用“扫描件识别”。</p></article></div>
       </section>
-      <section className="guide-note">
-        <b>资源保护</b>
-        <p>单图不超过 50MP 或 16,384px；图片合并总计不超过 100MP；单次批量输入不超过 2GB。长 PDF 和 OCR 不限制页数，但会按页处理并可能耗时较长。</p>
-      </section>
+      <footer className="guide-footnote"><b>大文件也能处理</b><span>单次批量不超过 2GB；长 PDF 与 OCR 会逐页处理，因此需要更多时间。</span></footer>
     </div>
   );
 }

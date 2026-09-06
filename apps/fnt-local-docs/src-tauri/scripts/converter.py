@@ -392,7 +392,10 @@ def stamp_pdf(source: Path, destination: Path, watermark: str | None, watermark_
         if watermark:
             font_size = max(14.0, min(96.0, watermark_size))
             opacity = max(0.05, min(0.70, watermark_opacity))
-            angle = max(-90.0, min(90.0, watermark_angle))
+            # CSS preview angles grow clockwise, while ReportLab angles grow
+            # counter-clockwise in PDF coordinates. Flip the sign so the
+            # exported watermark matches the on-screen preview.
+            angle = -max(-90.0, min(90.0, watermark_angle))
             for mark_x, mark_y in _watermark_points(width, height, watermark_position, watermark_count):
                 canvas.saveState()
                 canvas.setFillAlpha(opacity)
